@@ -73,6 +73,9 @@ pub(crate) mod windows {
             dwNumberOfBytesToMap: usize,
         ) -> *mut c_void;
         pub fn UnmapViewOfFile(lpBaseAddress: *const c_void) -> BOOL;
+        pub fn GetCommandLineW() -> *const u16;
+        pub fn CommandLineToArgvW(lpCmdLine: *const u16, pNumArgs: *mut i32) -> *mut *mut u16;
+        pub fn LocalFree(hMem: *mut c_void) -> *mut c_void;
     }
 
     pub fn write_stdout(s: &[u8]) {

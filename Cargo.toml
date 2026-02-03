@@ -16,3 +16,5 @@ panic = "abort"
 raph_common = { path = "common" }
 raph_api = { path = "api" }
 raph_runtime = { path = "runtime" }
+thiserror = { version = "2", default-features = false }
+anyhow = { version = "1", default-features = false }

@@ -6,6 +6,8 @@ use raph_api::{io::fs::MappedFile, println};
 extern crate raph_common;
 extern crate raph_runtime;
 
+pub mod syntax;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> i32 {
     println!("Hello, World!");

@@ -8,3 +8,6 @@ edition.workspace = true
 raph_common.workspace = true
 raph_api.workspace = true
 raph_runtime.workspace = true
+
+thiserror.workspace = true
+anyhow.workspace = true

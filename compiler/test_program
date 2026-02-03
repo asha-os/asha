@@ -1,1 +1,5 @@
-hlekjdjsoifdj
+struct Vec {r : Region} {T : Type} (n : Nat) {
+    ptr  : Ptr(r, T)
+}
+
+def index {n : Nat} (s : Vec n) : Nat = n

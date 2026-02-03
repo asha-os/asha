@@ -1,5 +1,0 @@
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-args=/ENTRY:_start /SUBSYSTEM:CONSOLE kernel32.lib"]
-
-[target.aarch64-pc-windows-msvc]
-rustflags = ["-C", "link-args=/ENTRY:_start /SUBSYSTEM:CONSOLE kernel32.lib"]
