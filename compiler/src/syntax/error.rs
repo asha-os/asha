@@ -136,6 +136,11 @@ impl fmt::Display for TokenKind {
             TokenKind::EndOfFile => write!(f, "end of file"),
             TokenKind::Def => write!(f, "`def`"),
             TokenKind::Let => write!(f, "`let`"),
+            TokenKind::In => write!(f, "`in`"),
+            TokenKind::Lambda => write!(f, "`\\` or `λ`"),
+            TokenKind::FatArrow => write!(f, "`=>`"),
+            TokenKind::Dot => write!(f, "`.`"),
+            TokenKind::Underscore => write!(f, "`_`"),
         }
     }
 }

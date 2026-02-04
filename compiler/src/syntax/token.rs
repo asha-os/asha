@@ -29,6 +29,11 @@ pub enum TokenKind {
     EndOfFile,
     Def,
     Let,
+    In,
+    Lambda,
+    FatArrow,
+    Dot,
+    Underscore,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

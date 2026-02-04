@@ -109,6 +109,7 @@ impl<'a> Iterator for Lexer<'a> {
                     b"struct" => TokenKind::Struct,
                     b"def" => TokenKind::Def,
                     b"let" => TokenKind::Let,
+                    b"in" => TokenKind::In,
                     _ if is_upper => TokenKind::UpperIdentifier,
                     _ => TokenKind::LowerIdentifier,
                 };
@@ -140,8 +141,67 @@ impl<'a> Iterator for Lexer<'a> {
             }
             '=' => {
                 self.cursor.advance(1);
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b'>'
+                {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::FatArrow,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                } else {
+                    Some(Ok(Token {
+                        kind: TokenKind::Equal,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                }
+            }
+            '\\' | 'λ' => {
+                self.cursor.advance_char(current);
                 Some(Ok(Token {
-                    kind: TokenKind::Equal,
+                    kind: TokenKind::Lambda,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
+            '.' => {
+                self.cursor.advance(1);
+                Some(Ok(Token {
+                    kind: TokenKind::Dot,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
+            '_' => {
+                self.cursor.advance(1);
+                if self.cursor.byte_offset < source.len() {
+                    let remaining = &source[self.cursor.byte_offset..];
+                    if let Some(c) = decode_utf8_char(remaining) {
+                        if is_ident_continue(c) {
+                            while self.cursor.byte_offset < source.len() {
+                                let remaining = &source[self.cursor.byte_offset..];
+                                if let Some(c) = decode_utf8_char(remaining) {
+                                    if is_ident_continue(c) {
+                                        self.cursor.advance_char(c);
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            let lexeme = &source[start..self.cursor.byte_offset];
+                            return Some(Ok(Token {
+                                kind: TokenKind::LowerIdentifier,
+                                lexeme,
+                                span: self.cursor.span_from(start),
+                            }));
+                        }
+                    }
+                }
+                Some(Ok(Token {
+                    kind: TokenKind::Underscore,
                     lexeme: &source[start..self.cursor.byte_offset],
                     span: self.cursor.span_from(start),
                 }))
