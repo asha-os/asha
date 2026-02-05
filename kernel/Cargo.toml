@@ -1,0 +1,10 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+publish.workspace = true
+edition.workspace = true
+
+[dependencies]
+common.workspace = true
+api.workspace = true
+runtime.workspace = true

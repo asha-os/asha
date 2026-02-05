@@ -17,6 +17,7 @@ extern crate runtime;
 pub mod module;
 pub mod elaboration;
 pub mod syntax;
+pub mod spine;
 
 #[derive(Debug)]
 struct ErrorWithSource<'a, E: Diagnostic + ::core::fmt::Debug> {

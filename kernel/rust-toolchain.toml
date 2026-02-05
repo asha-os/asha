@@ -1,0 +1,3 @@
+[toolchain]
+target = "aarch64-unknown-none"
+components = ["llvm-tools-preview", "rust-src"]

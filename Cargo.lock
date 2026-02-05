@@ -79,6 +79,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel"
+version = "0.1.0"
+dependencies = [
+ "api",
+ "common",
+ "runtime",
+]
+
+[[package]]
 name = "miette"
 version = "7.6.0"
 source = "git+https://github.com/huitseeker/miette?branch=no-std#f346d78d21b91f4a552ec9cb453c2c2b0f955b98"

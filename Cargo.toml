@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["api", "common","compiler", "runtime"]
+members = ["api", "common","compiler", "kernel", "runtime"]
 
 [workspace.package]
 publish = false
