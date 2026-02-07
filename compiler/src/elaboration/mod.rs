@@ -1,4 +1,5 @@
 pub mod ctx;
+pub mod err;
 pub mod reduce;
 pub mod subst;
 pub mod unify;
@@ -6,7 +7,10 @@ pub mod unify;
 use alloc::{string::String, vec::Vec};
 
 use crate::{
-    elaboration::ctx::{LocalContext, MetavarContext},
+    elaboration::{
+        ctx::{LocalContext, MetavarContext},
+        err::ElabError,
+    },
     module::{
         ModuleId,
         unique::{Unique, UniqueGen},
@@ -33,6 +37,7 @@ pub struct ElabState {
     pub gen_: UniqueGen,
     pub mctx: MetavarContext,
     pub lctx: LocalContext,
+    pub errors: Vec<ElabError>,
 }
 
 impl ElabState {
@@ -45,6 +50,7 @@ impl ElabState {
             gen_: UniqueGen::new(module),
             mctx: MetavarContext::new(),
             lctx: LocalContext { decls: Vec::new() },
+            errors: Vec::new(),
         }
     }
 
@@ -60,6 +66,18 @@ impl ElabState {
 
     fn erroneous_term(&mut self) -> Term {
         Term::MVar(self.gen_.fresh_unnamed())
+    }
+
+    pub fn elaborate_command(&mut self, cmd: &SyntaxExpr) {
+        match cmd {
+            SyntaxExpr::Def {
+                name,
+                binders,
+                return_type,
+                body,
+            } => self.elaborate_def(name, binders, return_type, body),
+            _ => todo!()
+        }
     }
 
     fn elaborate_def(
@@ -86,7 +104,10 @@ impl ElabState {
 
         if let Some(expected) = expected_type {
             if !self.unify(&inferred_type, expected) {
-                // todo: error
+                self.errors.push(ElabError::TypeMismatch {
+                    expected: expected.clone(),
+                    found: inferred_type,
+                });
             }
         }
 
@@ -100,7 +121,7 @@ impl ElabState {
                     return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
 
-                // todo: error
+                self.errors.push(ElabError::UndefinedVariable(name.clone()));
                 (self.erroneous_term(), self.erroneous_term())
             }
             _ => todo!(),
@@ -109,5 +130,27 @@ impl ElabState {
 
     fn unify(&mut self, a: &Term, b: &Term) -> bool {
         unify::is_def_eq(self, a, b)
+    }
+}
+
+pub fn elaborate_file(
+    module_id: ModuleId,
+    root: &SyntaxExpr,
+) -> Result<Environment, Vec<ElabError>> {
+    let mut state = ElabState::new(module_id);
+
+    match root {
+        SyntaxExpr::Root(commands) => {
+            for cmd in commands {
+                state.elaborate_command(cmd);
+            }
+        }
+        _ => return Err(alloc::vec![ElabError::ExpectedRoot]),
+    }
+
+    if state.errors.is_empty() {
+        Ok(state.env)
+    } else {
+        Err(state.errors)
     }
 }
