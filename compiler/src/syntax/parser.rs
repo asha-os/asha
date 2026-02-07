@@ -9,7 +9,7 @@ use crate::{spine::Literal, syntax::{
     Span,
     error::{ParseError, ParseErrorKind},
     token::{Token, TokenKind},
-    tree::{Binder, SyntaxExpr as Expr},
+    tree::{SyntaxBinder, SyntaxExpr as Expr},
 }};
 
 impl chumsky::span::Span for Span {
@@ -100,27 +100,27 @@ fn def_parser<'a>(
 
 fn binder<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Binder, ParserExtra<'a>> + Clone {
+) -> impl Parser<'a, ParserInput<'a>, SyntaxBinder, ParserExtra<'a>> + Clone {
     let explicit = just_token(TokenKind::LParen)
         .ignore_then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr.clone())
         .then_ignore(just_token(TokenKind::RParen))
-        .map(|(name, ty)| Binder::Explicit(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .map(|(name, ty)| SyntaxBinder::Explicit(lexeme_to_string(name.lexeme), Box::new(ty)));
 
     let implicit = just_token(TokenKind::LBrace)
         .ignore_then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr.clone())
         .then_ignore(just_token(TokenKind::RBrace))
-        .map(|(name, ty)| Binder::Implicit(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .map(|(name, ty)| SyntaxBinder::Implicit(lexeme_to_string(name.lexeme), Box::new(ty)));
 
     let instance = just_token(TokenKind::LBracket)
         .ignore_then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr)
         .then_ignore(just_token(TokenKind::RBracket))
-        .map(|(name, ty)| Binder::Instance(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .map(|(name, ty)| SyntaxBinder::Instance(lexeme_to_string(name.lexeme), Box::new(ty)));
 
     choice((explicit, implicit, instance))
 }
@@ -155,7 +155,7 @@ fn expr_impl<'a>(
             None => lhs,
             Some((true, rhs)) => Expr::Arrow(Box::new(lhs), Box::new(rhs)),
             Some((false, rhs)) => Expr::Sigma(
-                Binder::Explicit(String::from("_"), Box::new(lhs)),
+                SyntaxBinder::Explicit(String::from("_"), Box::new(lhs)),
                 Box::new(rhs),
             ),
         });

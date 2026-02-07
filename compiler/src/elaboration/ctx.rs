@@ -1,17 +1,51 @@
-use alloc::{collections::btree_map::BTreeMap, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::String, vec::Vec};
 
 use crate::{module::unique::{Unique, UniqueGen}, spine::Term};
 
 #[derive(Debug, Clone)]
 pub struct LocalDecl {
-    fvar: Unique,
-    type_: Term,
-    value: Option<Term>,
+    pub fvar: Unique,
+    pub type_: Term,
+    pub value: Option<Term>,
 }
 
 #[derive(Debug, Clone)]
 pub struct LocalContext {
-    decls: Vec<LocalDecl>,
+    pub decls: Vec<LocalDecl>,
+}
+
+impl LocalContext {
+    pub fn new() -> Self {
+        Self { decls: Vec::new() }
+    }
+
+    pub fn push_binder(&mut self, name: String, type_: Term, gen_: &mut UniqueGen) -> Unique {
+        let fvar = gen_.fresh(name);
+        self.decls.push(LocalDecl {
+            fvar: fvar.clone(),
+            type_,
+            value: None,
+        });
+        fvar
+    }
+
+    pub fn push_let(&mut self, name: String, type_: Term, value: Term, gen_: &mut UniqueGen) -> Unique {
+        let fvar = gen_.fresh(name);
+        self.decls.push(LocalDecl {
+            fvar: fvar.clone(),
+            type_,
+            value: Some(value),
+        });
+        fvar
+    }    
+
+    pub fn lookup(&self, fvar: Unique) -> Option<&LocalDecl> {
+        self.decls.iter().find(|d| d.fvar == fvar)
+    }
+    
+    pub fn lookup_name(&self, name: &str) -> Option<&LocalDecl> {
+        self.decls.iter().rev().find(|d| d.fvar.display_name.as_deref() == Some(name))
+    }
 }
 
 #[derive(Debug, Clone)]
