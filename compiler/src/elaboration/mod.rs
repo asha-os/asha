@@ -1,6 +1,5 @@
 pub mod ctx;
 pub mod err;
-pub mod infer;
 pub mod reduce;
 pub mod subst;
 pub mod unify;
@@ -18,10 +17,7 @@ use crate::{
         ctx::{LocalContext, MetavarContext},
         err::ElabError,
     }, log::pretty::pretty_term, module::{
-        ModuleId,
-        name::QualifiedName,
-        prim::{prim_array, prim_array_cons, prim_array_nil, prim_fin, prim_nat, prim_string},
-        unique::{Unique, UniqueGen},
+        ModuleId, name::QualifiedName, prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_NAT, PRIM_STRING}, unique::{Unique, UniqueGen}
     }, spine::{BinderInfo, Level, Literal, Term}, syntax::tree::{SyntaxBinder, SyntaxExpr}
 };
 
@@ -36,40 +32,40 @@ impl Environment {
     pub fn pre_loaded(module_id: ModuleId) -> Self {
         let mut decls = BTreeMap::new();
         decls.insert(
-            prim_nat(),
+            PRIM_NAT,
             Declaration::Constructor {
-                name: prim_nat(),
+                name: PRIM_NAT,
                 type_: Term::Sort(Level::Zero),
             },
         );
         decls.insert(
-            prim_string(),
+            PRIM_STRING,
             Declaration::Constructor {
-                name: prim_string(),
+                name: PRIM_STRING,
                 type_: Term::Sort(Level::Zero),
             },
         );
         decls.insert(
-            prim_fin(),
+            PRIM_FIN,
             Declaration::Constructor {
-                name: prim_fin(),
+                name: PRIM_FIN,
                 type_: Term::Pi(
                     BinderInfo::Explicit,
-                    Box::new(Term::Const(prim_nat())),
+                    Box::new(Term::Const(PRIM_NAT)),
                     Box::new(Term::Sort(Level::Zero)),
                 ),
             },
         );
         decls.insert(
-            prim_array(),
+            PRIM_ARRAY,
             Declaration::Constructor {
-                name: prim_array(),
+                name: PRIM_ARRAY,
                 type_: Term::Pi(
                     BinderInfo::Explicit,
                     Box::new(Term::Sort(Level::Zero)),
                     Box::new(Term::Pi(
                         BinderInfo::Explicit,
-                        Box::new(Term::Const(prim_nat())),
+                        Box::new(Term::Const(PRIM_NAT)),
                         Box::new(Term::Sort(Level::Zero)),
                     )),
                 ),
@@ -86,10 +82,10 @@ impl Environment {
         self.decls.values().find(|decl| match decl {
             Declaration::Definition {
                 name: decl_name, ..
-            } => decl_name.unique.display_name == Some(name.to_string()),
+            } => decl_name.display() == Some(name),
             Declaration::Constructor {
                 name: decl_name, ..
-            } => decl_name.unique.display_name == Some(name.to_string()),
+            } => decl_name.display() == Some(name),
         })
     }
 }
@@ -188,7 +184,7 @@ impl ElabState {
         return_type: &SyntaxExpr,
         body: &SyntaxExpr,
     ) {
-        let def_name = QualifiedName::new(self.gen_.fresh(name.to_string()));
+        let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
         let saved_lctx = self.lctx.clone();
         let mut binder_fvars: Vec<(Unique, BinderInfo, Term)> = Vec::new();
@@ -287,8 +283,8 @@ impl ElabState {
             }
             SyntaxExpr::Lit(lit) => {
                 let ty = match lit {
-                    crate::spine::Literal::Nat(_) => Term::Const(prim_nat()),
-                    crate::spine::Literal::Str(_) => Term::Const(prim_string()),
+                    crate::spine::Literal::Nat(_) => Term::Const(PRIM_NAT),
+                    crate::spine::Literal::Str(_) => Term::Const(PRIM_STRING),
                 };
                 (Term::Lit(lit.clone()), ty)
             }
@@ -303,12 +299,12 @@ impl ElabState {
 
                 let array_type = Term::App(
                     Box::new(Term::App(
-                        Box::new(Term::Const(prim_array())),
+                        Box::new(Term::Const(PRIM_ARRAY)),
                         Box::new(elem_type.clone()),
                     )),
                     Box::new(Term::Lit(Literal::Nat(elems_len))),
                 );
-                let mut result = Term::Const(prim_array_nil());
+                let mut result = Term::Const(PRIM_ARRAY_NIL);
                 let mut current_length = 0;
                 let mut elems = elems.clone();
                 elems.reverse();
@@ -318,7 +314,7 @@ impl ElabState {
                         Box::new(Term::App(
                             Box::new(Term::App(
                                 Box::new(Term::App(
-                                    Box::new(Term::Const(prim_array_cons())),
+                                    Box::new(Term::Const(PRIM_ARRAY_CONS)),
                                     Box::new(elem_type.clone()),
                                 )),
                                 Box::new(Term::Lit(Literal::Nat(current_length))),

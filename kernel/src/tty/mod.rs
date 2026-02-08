@@ -112,7 +112,7 @@ impl Tty {
                 self.set_cursor(self.cursor.0.saturating_add(1), self.cursor.1);
             }
             KeyAction::Enter => {
-                self.clear_from_col(0, 0);
+                self.clear_from_col(0, self.cursor.1);
                 let current_prompt = core::mem::take(&mut self.current_prompt);
                 self.set_cursor(0, self.cursor.1);
                 return Some(current_prompt)
@@ -123,7 +123,7 @@ impl Tty {
     }
 
     fn set_cursor(&mut self, col: usize, row: usize) {
-        if col > self.current_prompt.len() || row > 0 {
+        if col > self.current_prompt.len() {
             return;
         }
         let (current_col, current_row) = self.cursor;

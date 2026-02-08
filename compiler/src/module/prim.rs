@@ -1,53 +1,8 @@
-use alloc::string::ToString;
+use crate::module::name::{IntrinsicName, QualifiedName};
 
-use crate::module::{name::QualifiedName, unique::Unique};
-
-pub const PRIM_MODULE_ID: &str = "prim";
-
-pub fn prim_nat() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        0,
-        PRIM_MODULE_ID.to_string(),
-        Some("Nat".to_string()),
-    ))
-}
-
-pub fn prim_string() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        1,
-        PRIM_MODULE_ID.to_string(),
-        Some("String".to_string()),
-    ))
-}
-
-pub fn prim_fin() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        2,
-        PRIM_MODULE_ID.to_string(),
-        Some("Fin".to_string()),
-    ))
-}
-
-pub fn prim_array() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        3,
-        PRIM_MODULE_ID.to_string(),
-        Some("Array".to_string()),
-    ))
-}
-
-pub fn prim_array_nil() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        4,
-        PRIM_MODULE_ID.to_string(),
-        Some("Array.Nil".to_string()),
-    ))
-}
-
-pub fn prim_array_cons() -> QualifiedName {
-    QualifiedName::new(Unique::new(
-        5,
-        PRIM_MODULE_ID.to_string(),
-        Some("Array.Cons".to_string()),
-    ))
-}
+pub const PRIM_NAT: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::Nat);
+pub const PRIM_FIN: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::Fin);
+pub const PRIM_STRING: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::Str);
+pub const PRIM_ARRAY: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::Array);
+pub const PRIM_ARRAY_NIL: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::ArrayNil);
+pub const PRIM_ARRAY_CONS: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::ArrayCons);

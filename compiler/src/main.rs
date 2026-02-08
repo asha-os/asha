@@ -93,7 +93,7 @@ pub extern "C" fn _start() -> i32 {
                     module_id,
                     &tree
                 ) {
-                    Ok(elab) => println!("Elaboration successful: {:#?}", elab),
+                    Ok(elab) => println!("Elaboration successful:\n{}", elab),
                     Err(errs) => {
                         for err in &errs {
                             println!("Error during elaboration: {}", err);
