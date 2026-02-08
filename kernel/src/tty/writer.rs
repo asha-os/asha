@@ -135,6 +135,18 @@ impl TextWriter {
         self.clear_byte(col * 8, row * 8);
     }
 
+    pub fn clear_from_col(&mut self, col: usize, row: usize) {
+        for c in col..self.info.width() / 8 {
+            self.clear_byte(c * 8, row * 8);
+        }
+    }
+
+    pub fn clear_until_col(&mut self, col: usize, row: usize) {
+        for c in 0..col {
+            self.clear_byte(c * 8, row * 8);
+        }
+    }
+
     pub fn clear_last_line(&mut self) {
         let bbp = self.info.bytes_per_pixel();
         let start = (self.info.height() - 8) * self.info.stride() * bbp;

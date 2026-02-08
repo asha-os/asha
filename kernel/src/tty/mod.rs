@@ -54,8 +54,20 @@ impl Tty {
         match action {
             KeyAction::Type(c) => {
                 let (col, row) = self.cursor;
-                self.current_prompt.push(c as u8);
-                self.writer.set_byte_at(c as u8, col, row, self.color_code);
+                if col < self.current_prompt.len() {
+                    self.writer.clear_from_col(col, row);
+                    self.current_prompt.insert(col, c as u8);
+                    let following_chars = self.current_prompt
+                        .iter()
+                        .enumerate()
+                        .skip(col);
+                    for (i, &byte) in following_chars {
+                        self.writer.set_byte_at(byte, i, row, self.color_code);
+                    }
+                } else {
+                    self.current_prompt.push(c as u8);
+                    self.writer.set_byte_at(c as u8, col, row, self.color_code);
+                }
                 self.set_cursor(col + 1, row);
             }
             KeyAction::Backspace => {
@@ -63,9 +75,20 @@ impl Tty {
                 if col == 0 {
                     return;
                 }
-                self.cursor.0 -= 1;
+                if col < self.current_prompt.len() {
+                    self.writer.clear_from_col(col - 1, row);
+                    let following_chars = self.current_prompt
+                        .iter()
+                        .enumerate()
+                        .skip(col);
+                    for (i, &byte) in following_chars {
+                        self.writer.set_byte_at(byte, i - 1, row, self.color_code);
+                    }
+                } else {
+                    self.writer.clear_byte_at(col - 1, row);
+                }
                 self.current_prompt.remove(col - 1);
-                self.writer.clear_byte_at(col - 1, row);
+                self.set_cursor(col - 1, row);
             }
             KeyAction::ArrowLeft => {
                 self.set_cursor(self.cursor.0.saturating_sub(1), self.cursor.1);
