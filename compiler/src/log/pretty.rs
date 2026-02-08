@@ -16,10 +16,10 @@ impl Display for Environment {
 impl Display for Declaration {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Declaration::Definition { name, type_, value } => {
+            Declaration::Definition { name, type_, value, .. } => {
                 write!(f, "def {} : {} := {}", name.display().unwrap(), type_, value)
             },
-            Declaration::Constructor { name, type_ } => {
+            Declaration::Constructor { name, type_, .. } => {
                 write!(f, "constructor {} : {}", name.display().unwrap(), type_)
             }
         }

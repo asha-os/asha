@@ -31,9 +31,9 @@ pub(crate) mod windows {
 
     unsafe extern "system" {
         pub fn GetStdHandle(nStdHandle: DWORD) -> HANDLE;
-        pub fn WriteConsoleA(
+        pub fn WriteConsoleW(
             hConsoleOutput: HANDLE,
-            lpBuffer: *const u8,
+            lpBuffer: *const u16,
             nNumberOfCharsToWrite: DWORD,
             lpNumberOfCharsWritten: *mut DWORD,
             lpReserved: *mut c_void,
@@ -82,13 +82,39 @@ pub(crate) mod windows {
         unsafe {
             let handle = GetStdHandle(STD_OUTPUT_HANDLE);
             let mut written: DWORD = 0;
-            WriteConsoleA(
-                handle,
-                s.as_ptr(),
-                s.len() as DWORD,
-                &mut written,
-                core::ptr::null_mut(),
-            );
+
+            let str = core::str::from_utf8_unchecked(s);
+            let mut buf = [0u16; 1024];
+            let mut pos = 0;
+
+            for ch in str.chars() {
+                let mut tmp = [0u16; 2];
+                let encoded = ch.encode_utf16(&mut tmp);
+                for &unit in encoded.iter() {
+                    if pos >= buf.len() {
+                        WriteConsoleW(
+                            handle,
+                            buf.as_ptr(),
+                            pos as DWORD,
+                            &mut written,
+                            core::ptr::null_mut(),
+                        );
+                        pos = 0;
+                    }
+                    buf[pos] = unit;
+                    pos += 1;
+                }
+            }
+
+            if pos > 0 {
+                WriteConsoleW(
+                    handle,
+                    buf.as_ptr(),
+                    pos as DWORD,
+                    &mut written,
+                    core::ptr::null_mut(),
+                );
+            }
         }
     }
 }

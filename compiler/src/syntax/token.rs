@@ -1,4 +1,4 @@
-use crate::syntax::Span;
+use crate::syntax::{Span, Spanned};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token<'a> {
@@ -41,4 +41,10 @@ pub enum TokenKind {
 pub struct TokenStream<'a> {
     pub tokens: &'a [Token<'a>],
     pub position: usize,
+}
+
+impl Spanned for Token<'_> {
+    fn span(&self) -> Span {
+        self.span
+    }    
 }

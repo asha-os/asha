@@ -6,19 +6,22 @@ use api::{
     io::{fs::MappedFile, stdin::Args},
     println,
 };
-use miette::{NamedSource, NarratableReportHandler};
+use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource};
 
-use crate::{log::ErrorWithSource, syntax::{SourceFile, lexer::Lexer, parser::parse}};
+use crate::{
+    log::ErrorWithSource,
+    syntax::{SourceFile, lexer::Lexer, parser::parse},
+};
 
 extern crate alloc;
 extern crate common;
 extern crate runtime;
 
-pub mod module;
 pub mod elaboration;
-pub mod syntax;
-pub mod spine;
 pub mod log;
+pub mod module;
+pub mod spine;
+pub mod syntax;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> i32 {
@@ -26,7 +29,7 @@ pub extern "C" fn _start() -> i32 {
     if args.is_none() {
         println!("You must provide a source file as an argument.");
         return 1;
-    }    
+    }
     let mut args = args.unwrap();
     if args.len() < 2 {
         println!("You must provide a source file as an argument.");
@@ -56,7 +59,7 @@ pub extern "C" fn _start() -> i32 {
             }
         }
 
-        let handler = NarratableReportHandler::new();
+        let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode());
         let source_str = ::core::str::from_utf8(file.as_bytes()).unwrap_or("<invalid utf8>");
         let named_source = NamedSource::new(source_file.name, String::from(source_str));
 
@@ -89,24 +92,26 @@ pub extern "C" fn _start() -> i32 {
             Some(tree) => {
                 println!("AST produced for module {}: {:#?}", source_file.name, tree);
                 let module_id = source_file.name.to_string();
-                match elaboration::elaborate_file(
-                    module_id,
-                    &tree
-                ) {
+                match elaboration::elaborate_file(module_id, &tree) {
                     Ok(elab) => println!("Elaboration successful:\n{}", elab),
                     Err(errs) => {
                         for err in &errs {
-                            println!("Error during elaboration: {}", err);
+                            let mut output = String::new();
+                            let err_with_source = ErrorWithSource {
+                                error: err,
+                                source: &named_source,
+                            };
+                            if handler.render_report(&mut output, &err_with_source).is_ok() {
+                                println!("{}", output);
+                            }
                         }
-                        println!("Elaboration failed with {} error(s)", errs.len());
                     }
                 }
-                
-            },
+            }
             None if errors.is_empty() && lex_errors.is_empty() => println!("No AST produced"),
             None => {}
         }
-        
+
         return 0;
     } else {
         println!("File not found!");

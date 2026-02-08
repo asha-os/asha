@@ -76,3 +76,16 @@ impl LexerCursor {
         Span::new(self.file, start, self.byte_offset)
     }
 }
+
+pub trait Spanned {
+    fn span(&self) -> Span;
+}
+
+fn spanning<A: Spanned, B: Spanned>(a: &A, b: &B) -> Span {
+    let span_a = a.span();
+    let span_b = b.span();
+    if span_a.file != span_b.file {
+        panic!("Cannot span across different files");
+    }
+    Span::new(span_a.file, span_a.start.min(span_b.start), span_a.end.max(span_b.end))
+}

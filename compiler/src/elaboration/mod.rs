@@ -15,63 +15,57 @@ use api::println;
 use crate::{
     elaboration::{
         ctx::{LocalContext, MetavarContext},
-        err::ElabError,
-    }, log::pretty::pretty_term, module::{
-        ModuleId, name::QualifiedName, prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_NAT, PRIM_STRING}, unique::{Unique, UniqueGen}
-    }, spine::{BinderInfo, Level, Literal, Term}, syntax::tree::{SyntaxBinder, SyntaxExpr}
+        err::{ElabError, ElabErrorKind},
+    },
+    log::pretty::pretty_term,
+    module::{
+        ModuleId,
+        name::QualifiedName,
+        prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_NAT, PRIM_STRING},
+        unique::{Unique, UniqueGen},
+    },
+    spine::{BinderInfo, Level, Literal, Term},
+    syntax::{Span, Spanned, tree::{SyntaxBinder, SyntaxExpr}},
 };
 
 #[derive(Debug, Clone)]
 pub struct Environment {
     pub module_id: ModuleId,
+    pub externals: BTreeMap<QualifiedName, Term>,
     pub decls: BTreeMap<QualifiedName, Declaration>,
 }
 
 impl Environment {
     // todo: remove
     pub fn pre_loaded(module_id: ModuleId) -> Self {
-        let mut decls = BTreeMap::new();
-        decls.insert(
-            PRIM_NAT,
-            Declaration::Constructor {
-                name: PRIM_NAT,
-                type_: Term::Sort(Level::Zero),
-            },
-        );
-        decls.insert(
-            PRIM_STRING,
-            Declaration::Constructor {
-                name: PRIM_STRING,
-                type_: Term::Sort(Level::Zero),
-            },
-        );
-        decls.insert(
+        let mut externals = BTreeMap::new();
+        externals.insert(PRIM_NAT, Term::Sort(Level::Zero));
+        externals.insert(PRIM_STRING, Term::Sort(Level::Zero));
+        externals.insert(
             PRIM_FIN,
-            Declaration::Constructor {
-                name: PRIM_FIN,
-                type_: Term::Pi(
+            Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(Term::Const(PRIM_NAT)),
+                Box::new(Term::Sort(Level::Zero)),
+            ),
+        );
+        externals.insert(
+            PRIM_ARRAY,
+            Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(Term::Sort(Level::Zero)),
+                Box::new(Term::Pi(
                     BinderInfo::Explicit,
                     Box::new(Term::Const(PRIM_NAT)),
                     Box::new(Term::Sort(Level::Zero)),
-                ),
-            },
+                )),
+            ),
         );
-        decls.insert(
-            PRIM_ARRAY,
-            Declaration::Constructor {
-                name: PRIM_ARRAY,
-                type_: Term::Pi(
-                    BinderInfo::Explicit,
-                    Box::new(Term::Sort(Level::Zero)),
-                    Box::new(Term::Pi(
-                        BinderInfo::Explicit,
-                        Box::new(Term::Const(PRIM_NAT)),
-                        Box::new(Term::Sort(Level::Zero)),
-                    )),
-                ),
-            },
-        );
-        Self { module_id, decls }
+        Self {
+            module_id,
+            externals,
+            decls: BTreeMap::new(),
+        }
     }
 
     pub fn lookup(&self, name: &QualifiedName) -> Option<&Declaration> {
@@ -96,10 +90,12 @@ pub enum Declaration {
         name: QualifiedName,
         type_: Term,
         value: Term,
+        span: Span,
     },
     Constructor {
         name: QualifiedName,
         type_: Term,
+        span: Span,
     },
 }
 
@@ -132,6 +128,7 @@ impl ElabState {
         Self {
             env: Environment {
                 module_id: module.clone(),
+                externals: BTreeMap::new(),
                 decls: BTreeMap::new(),
             },
             gen_: UniqueGen::new(module),
@@ -168,8 +165,9 @@ impl ElabState {
                 binders,
                 return_type,
                 body,
-            } => self.elaborate_def(name, binders, return_type, body),
-            SyntaxExpr::Eval(expr) => {
+                span
+            } => self.elaborate_def(name, binders, return_type, body, *span),
+            SyntaxExpr::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", pretty_term(&term));
             }
@@ -183,6 +181,7 @@ impl ElabState {
         binders: &[SyntaxBinder],
         return_type: &SyntaxExpr,
         body: &SyntaxExpr,
+        span: Span
     ) {
         let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
@@ -191,9 +190,9 @@ impl ElabState {
 
         for binder in binders {
             let (binder_name, binder_type_syntax, info) = match binder {
-                SyntaxBinder::Explicit(n, ty) => (n, ty, BinderInfo::Explicit),
-                SyntaxBinder::Implicit(n, ty) => (n, ty, BinderInfo::Implicit),
-                SyntaxBinder::Instance(n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+                SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
+                SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
+                SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
             };
             let elaborated_type = self.elaborate_term(binder_type_syntax, None);
             let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
@@ -207,7 +206,7 @@ impl ElabState {
         for (fvar, info, ty) in binder_fvars.into_iter().rev() {
             pi_type = subst::abstract_fvar(&pi_type, fvar.clone());
             value = subst::abstract_fvar(&value, fvar);
-            
+
             pi_type = Term::Pi(info, Box::new(ty), Box::new(pi_type));
         }
 
@@ -217,6 +216,7 @@ impl ElabState {
                 name: def_name,
                 type_: pi_type,
                 value,
+                span
             },
         );
 
@@ -228,10 +228,13 @@ impl ElabState {
 
         if let Some(expected) = expected_type {
             if !self.unify(&inferred_type, expected) {
-                self.errors.push(ElabError::TypeMismatch {
-                    expected: expected.clone(),
-                    found: inferred_type,
-                });
+                self.errors.push(ElabError::new(
+                    err::ElabErrorKind::TypeMismatch {
+                        expected: expected.clone(),
+                        found: inferred_type,
+                    },
+                    syntax.span(),
+                ));
             }
         }
 
@@ -240,7 +243,7 @@ impl ElabState {
 
     fn elaborate_term_inner(&mut self, syntax: &SyntaxExpr) -> (Term, Term) {
         match syntax {
-            SyntaxExpr::Var(name) => {
+            SyntaxExpr::Var { name, .. } => {
                 if let Some(decl) = self.lctx.lookup_name(name) {
                     return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
@@ -257,14 +260,17 @@ impl ElabState {
                     }
                 }
 
-                self.errors.push(ElabError::UndefinedVariable(name.clone()));
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::UndefinedVariable(name.clone()),
+                    syntax.span(),
+                ));
                 (self.erroneous_term(), self.erroneous_term())
             }
-            SyntaxExpr::Constructor(name) if name == "Type" => (
+            SyntaxExpr::Constructor { name, .. } if name == "Type" => (
                 Term::Sort(Level::Zero),
                 Term::Sort(Level::Succ(Box::new(Level::Zero))),
             ),
-            SyntaxExpr::Constructor(name) => {
+            SyntaxExpr::Constructor { name, .. } => {
                 if let Some(decl) = self.env.lookup_string(name) {
                     match decl {
                         Declaration::Constructor { type_, .. } => {
@@ -278,17 +284,22 @@ impl ElabState {
                 }
 
                 self.errors
-                    .push(ElabError::UndefinedConstructor(name.clone()));
+                    .push(ElabError::new(
+                        ElabErrorKind::UndefinedConstructor(name.clone()),
+                        syntax.span(),
+                    ));
                 (self.erroneous_term(), self.erroneous_term())
             }
-            SyntaxExpr::Lit(lit) => {
-                let ty = match lit {
+            SyntaxExpr::Lit { value, .. } => {
+                let ty = match value {
                     crate::spine::Literal::Nat(_) => Term::Const(PRIM_NAT),
                     crate::spine::Literal::Str(_) => Term::Const(PRIM_STRING),
                 };
-                (Term::Lit(lit.clone()), ty)
+                (Term::Lit(value.clone()), ty)
             }
-            SyntaxExpr::Array(elems) => {
+            SyntaxExpr::Array {
+                elements: elems, ..
+            } => {
                 let elem_type = if let Some(head) = elems.first() {
                     let (_term, head_ty) = self.elaborate_term_inner(head);
                     head_ty
@@ -327,9 +338,9 @@ impl ElabState {
                 }
                 (result, array_type)
             }
-            SyntaxExpr::App(fun, arg) => {
+            SyntaxExpr::App { fun, arg, .. } => {
                 let (mut term, mut fn_type) = self.elaborate_term_inner(fun);
-                
+
                 loop {
                     fn_type = reduce::whnf(self, &fn_type);
                     match &fn_type {
@@ -337,10 +348,10 @@ impl ElabState {
                             let mvar = self.fresh_mvar(*param_ty.clone());
                             fn_type = subst::instantiate(body_ty, &mvar);
                             term = Term::App(Box::new(term), Box::new(mvar));
-                        },
+                        }
                         _ => break,
                     };
-                };
+                }
 
                 match fn_type {
                     Term::Pi(_info, param_ty, body_ty) => {
@@ -352,13 +363,19 @@ impl ElabState {
                         )
                     }
                     u => {
-                        self.errors.push(ElabError::NotAFunction(u));
+                        self.errors.push(ElabError::new(
+                            ElabErrorKind::NotAFunction(u),
+                            syntax.span(),
+                        ));
                         return (self.erroneous_term(), self.erroneous_term());
                     }
                 }
             }
             u => {
-                self.errors.push(ElabError::UnsupportedSyntax(u.clone()));
+                self.errors.push(ElabError::new(
+                    err::ElabErrorKind::UnsupportedSyntax(u.clone()),
+                    syntax.span(),
+                ));
                 (self.erroneous_term(), self.erroneous_term())
             }
         }
@@ -381,7 +398,7 @@ pub fn elaborate_file(
                 state.elaborate_command(cmd);
             }
         }
-        _ => return Err(alloc::vec![ElabError::ExpectedRoot]),
+        _ => panic!("expected a root syntax expression"),
     }
 
     if state.errors.is_empty() {

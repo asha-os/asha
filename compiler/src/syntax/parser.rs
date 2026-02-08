@@ -5,12 +5,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use chumsky::{input::Input, prelude::*};
 
-use crate::{spine::Literal, syntax::{
-    Span,
-    error::{ParseError, ParseErrorKind},
-    token::{Token, TokenKind},
-    tree::{SyntaxBinder, SyntaxExpr as Expr},
-}};
+use crate::{
+    spine::Literal,
+    syntax::{
+        Span, Spanned, error::{ParseError, ParseErrorKind}, spanning, token::{Token, TokenKind}, tree::{SyntaxBinder, SyntaxExpr as Expr}
+    },
+};
 
 impl chumsky::span::Span for Span {
     type Offset = usize;
@@ -68,10 +68,7 @@ pub fn parse<'a>(
 fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
     let mut expr = Recursive::declare();
 
-    let def = choice((
-        def_parser(expr.clone()),
-        eval_parser(expr.clone()),
-    ));
+    let def = choice((def_parser(expr.clone()), eval_parser(expr.clone())));
 
     expr.define(expr_impl(expr.clone()));
 
@@ -94,6 +91,7 @@ fn def_parser<'a>(
                 .then(expr),
         )
         .map(|(name, ((binders, ret_type), body))| Expr::Def {
+            span: spanning(&name, &body),
             name: lexeme_to_string(name.lexeme),
             binders,
             return_type: Box::new(ret_type),
@@ -105,34 +103,55 @@ fn eval_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
     just_token(TokenKind::Eval)
-        .ignore_then(expr)
+        .then(expr)
         .then_ignore(just_token(TokenKind::Semicolon))
-        .map(|e| Expr::Eval(Box::new(e)))
+        .map(|(tok, expr)| Expr::Eval {
+            span: spanning(&tok, &expr),
+            expr: Box::new(expr),
+        })
 }
 
 fn binder<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, SyntaxBinder, ParserExtra<'a>> + Clone {
     let explicit = just_token(TokenKind::LParen)
-        .ignore_then(just_token(TokenKind::LowerIdentifier))
+        .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr.clone())
-        .then_ignore(just_token(TokenKind::RParen))
-        .map(|(name, ty)| SyntaxBinder::Explicit(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .then(just_token(TokenKind::RParen))
+        .map(|(((lparen, name), ty), rparen)| {
+            SyntaxBinder::Explicit(
+                spanning(&lparen, &rparen),
+                lexeme_to_string(name.lexeme),
+                Box::new(ty),
+            )
+        });
 
     let implicit = just_token(TokenKind::LBrace)
-        .ignore_then(just_token(TokenKind::LowerIdentifier))
+        .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr.clone())
-        .then_ignore(just_token(TokenKind::RBrace))
-        .map(|(name, ty)| SyntaxBinder::Implicit(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .then(just_token(TokenKind::RBrace))
+        .map(|(((lbrace, name), ty), rbrace)| {
+            SyntaxBinder::Implicit(
+                spanning(&lbrace, &rbrace),
+                lexeme_to_string(name.lexeme),
+                Box::new(ty),
+            )
+        });
 
     let instance = just_token(TokenKind::LBracket)
-        .ignore_then(just_token(TokenKind::LowerIdentifier))
+        .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr)
-        .then_ignore(just_token(TokenKind::RBracket))
-        .map(|(name, ty)| SyntaxBinder::Instance(lexeme_to_string(name.lexeme), Box::new(ty)));
+        .then(just_token(TokenKind::RBracket))
+        .map(|(((lbracket, name), ty), rbracket)| {
+            SyntaxBinder::Instance(
+                spanning(&lbracket, &rbracket),
+                lexeme_to_string(name.lexeme),
+                Box::new(ty),
+            )
+        });
 
     choice((explicit, implicit, instance))
 }
@@ -142,15 +161,23 @@ fn expr_impl<'a>(
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone {
     let atom = expr_atom(expr.clone());
 
-    let app = atom.clone().foldl(atom.clone().repeated(), |lhs, rhs| {
-        Expr::App(Box::new(lhs), Box::new(rhs))
-    });
+    let app = atom
+        .clone()
+        .foldl(atom.clone().repeated(), |lhs, rhs| Expr::App {
+            span: spanning(&lhs, &rhs),
+            fun: Box::new(lhs),
+            arg: Box::new(rhs),
+        });
 
     let proj = app.clone().foldl(
         just_token(TokenKind::Dot)
             .ignore_then(just_token(TokenKind::LowerIdentifier))
             .repeated(),
-        |lhs, field| Expr::Proj(Box::new(lhs), lexeme_to_string(field.lexeme)),
+        |lhs, field| Expr::Proj {
+            span: spanning(&lhs, &field),
+            value: Box::new(lhs),
+            field: lexeme_to_string(field.lexeme),
+        },
     );
 
     let arrow_or_product = proj
@@ -165,41 +192,55 @@ fn expr_impl<'a>(
         )
         .map(|(lhs, rest)| match rest {
             None => lhs,
-            Some((true, rhs)) => Expr::Arrow(Box::new(lhs), Box::new(rhs)),
-            Some((false, rhs)) => Expr::Sigma(
-                SyntaxBinder::Explicit(String::from("_"), Box::new(lhs)),
-                Box::new(rhs),
-            ),
+            Some((true, rhs)) => Expr::Array {
+                span: spanning(&lhs, &rhs),
+                elements: alloc::vec![lhs, rhs],
+            },
+            Some((false, rhs)) => Expr::Sigma {
+                span: spanning(&lhs, &rhs),
+                binder: SyntaxBinder::Explicit(lhs.span(), String::from("_"), Box::new(lhs)),
+                codomain: Box::new(rhs),
+            },
         });
 
     let pi = binder(expr.clone())
         .then_ignore(just_token(TokenKind::Arrow))
         .then(expr.clone())
-        .map(|(binder, body)| Expr::Pi(binder, Box::new(body)));
+        .map(|(binder, body)| Expr::Pi {
+            span: spanning(&binder, &body),
+            binder,
+            codomain: Box::new(body),
+        });
 
     let sigma = binder(expr.clone())
         .then_ignore(just_token(TokenKind::Product))
         .then(expr.clone())
-        .map(|(binder, body)| Expr::Sigma(binder, Box::new(body)));
+        .map(|(binder, body)| Expr::Sigma {
+            span: spanning(&binder, &body),
+            binder,
+            codomain: Box::new(body),
+        });
 
     let lambda = just_token(TokenKind::Lambda)
-        .ignore_then(binder(expr.clone()).repeated().at_least(1).collect())
+        .then(binder(expr.clone()).repeated().at_least(1).collect())
         .then_ignore(just_token(TokenKind::FatArrow))
         .then(expr.clone())
-        .map(|(binders, body)| Expr::Lambda {
+        .map(|((lambda, binders), body)| Expr::Lambda {
+            span: spanning(&lambda, &body),
             binders,
             body: Box::new(body),
         });
 
     let let_typed = just_token(TokenKind::Let)
-        .ignore_then(just_token(TokenKind::LowerIdentifier))
+        .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr.clone())
         .then_ignore(just_token(TokenKind::Equal))
         .then(expr.clone())
         .then_ignore(just_token(TokenKind::In))
         .then(expr.clone())
-        .map(|(((name, ty), value), body)| Expr::Let {
+        .map(|((((let_, name), ty), value), body)| Expr::Let {
+            span: spanning(&let_, &body),
             name: lexeme_to_string(name.lexeme),
             type_ann: Some(Box::new(ty)),
             value: Box::new(value),
@@ -207,12 +248,13 @@ fn expr_impl<'a>(
         });
 
     let let_untyped = just_token(TokenKind::Let)
-        .ignore_then(just_token(TokenKind::LowerIdentifier))
+        .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Equal))
         .then(expr.clone())
         .then_ignore(just_token(TokenKind::In))
         .then(expr)
-        .map(|((name, value), body)| Expr::Let {
+        .map(|(((let_, name), value), body)| Expr::Let {
+            span: spanning(&let_, &body),
             name: lexeme_to_string(name.lexeme),
             type_ann: None,
             value: Box::new(value),
@@ -225,46 +267,75 @@ fn expr_impl<'a>(
 fn expr_atom<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone {
-    let var = just_token(TokenKind::LowerIdentifier).map(|t| Expr::Var(lexeme_to_string(t.lexeme)));
+    let var = just_token(TokenKind::LowerIdentifier).map(|t| Expr::Var {
+        name: lexeme_to_string(t.lexeme),
+        span: t.span,
+    });
 
-    let constructor = just_token(TokenKind::UpperIdentifier)
-        .map(|t| Expr::Constructor(lexeme_to_string(t.lexeme)));
+    let constructor = just_token(TokenKind::UpperIdentifier).map(|t| Expr::Constructor {
+        name: lexeme_to_string(t.lexeme),
+        span: t.span,
+    });
 
     let number = just_token(TokenKind::Number).map(|t| {
         let s = lexeme_to_string(t.lexeme);
         let n = s.parse::<u64>().unwrap_or(0);
-        Expr::Lit(Literal::Nat(n))
+        Expr::Lit {
+            value: Literal::Nat(n),
+            span: t.span,
+        }
     });
 
     let string = just_token(TokenKind::String).map(|t| {
         let s = lexeme_to_string(t.lexeme);
         let inner = if s.len() >= 2 { &s[1..s.len() - 1] } else { &s };
-        Expr::Lit(Literal::Str(String::from(inner)))
+        Expr::Lit {
+            value: Literal::Str(String::from(inner)),
+            span: t.span,
+        }
     });
 
-    let hole = just_token(TokenKind::Underscore).map(|_| Expr::Hole);
+    let hole = just_token(TokenKind::Underscore).map(|t| Expr::Hole(t.span));
 
     let tuple_or_grouped = just_token(TokenKind::LParen)
-        .ignore_then(
+        .then(
             expr.clone()
                 .separated_by(just_token(TokenKind::Comma))
                 .collect::<Vec<_>>(),
         )
-        .then_ignore(just_token(TokenKind::RParen))
-        .map(|items| {
+        .then(just_token(TokenKind::RParen))
+        .map(|((lparen, items), rparen)| {
             if items.len() == 1 {
                 items.into_iter().next().unwrap()
             } else {
-                Expr::Tuple(items)
+                Expr::Tuple {
+                    elements: items,
+                    span: spanning(&lparen, &rparen),
+                }
             }
         });
-    
-    let array = just_token(TokenKind::LBracket)
-        .ignore_then(expr.clone().separated_by(just_token(TokenKind::Comma)).collect())
-        .then_ignore(just_token(TokenKind::RBracket))
-        .map(Expr::Array);
 
-    choice((var, constructor, number, string, hole, tuple_or_grouped, array))
+    let array = just_token(TokenKind::LBracket)
+        .then(
+            expr.clone()
+                .separated_by(just_token(TokenKind::Comma))
+                .collect(),
+        )
+        .then(just_token(TokenKind::RBracket))
+        .map(|((lbracket, items), rbracket)| Expr::Array {
+            elements: items,
+            span: spanning(&lbracket, &rbracket),
+        });
+
+    choice((
+        var,
+        constructor,
+        number,
+        string,
+        hole,
+        tuple_or_grouped,
+        array,
+    ))
 }
 
 fn rich_to_parse_error(err: Rich<'_, Token<'_>, Span>) -> ParseError {

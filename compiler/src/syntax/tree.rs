@@ -1,9 +1,10 @@
 extern crate alloc;
 
+use crate::spine::Literal;
+use crate::syntax::{Span, Spanned};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::spine::Literal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyntaxExpr {
@@ -13,34 +14,112 @@ pub enum SyntaxExpr {
         binders: Vec<SyntaxBinder>,
         return_type: Box<SyntaxExpr>,
         body: Box<SyntaxExpr>,
+        span: Span,
     },
-    Var(String),
-    Constructor(String),
-    App(Box<SyntaxExpr>, Box<SyntaxExpr>),
+    Var {
+        name: String,
+        span: Span,
+    },
+    Constructor {
+        name: String,
+        span: Span,
+    },
+    App {
+        fun: Box<SyntaxExpr>,
+        arg: Box<SyntaxExpr>,
+        span: Span,
+    },
     Lambda {
         binders: Vec<SyntaxBinder>,
         body: Box<SyntaxExpr>,
+        span: Span,
     },
     Let {
         name: String,
         type_ann: Option<Box<SyntaxExpr>>,
         value: Box<SyntaxExpr>,
         body: Box<SyntaxExpr>,
+        span: Span,
     },
-    Lit(Literal),
-    Tuple(Vec<SyntaxExpr>),
-    Proj(Box<SyntaxExpr>, String),
-    Hole,
-    Arrow(Box<SyntaxExpr>, Box<SyntaxExpr>),
-    Array(Vec<SyntaxExpr>),
-    Pi(SyntaxBinder, Box<SyntaxExpr>),
-    Sigma(SyntaxBinder, Box<SyntaxExpr>),
-    Eval(Box<SyntaxExpr>)
+    Lit {
+        value: Literal,
+        span: Span,
+    },
+    Tuple {
+        elements: Vec<SyntaxExpr>,
+        span: Span,
+    },
+    Proj {
+        value: Box<SyntaxExpr>,
+        field: String,
+        span: Span,
+    },
+    Hole(Span),
+    Arrow {
+        param_type: Box<SyntaxExpr>,
+        return_type: Box<SyntaxExpr>,
+        span: Span,
+    },
+    Array {
+        elements: Vec<SyntaxExpr>,
+        span: Span,
+    },
+    Pi {
+        binder: SyntaxBinder,
+        codomain: Box<SyntaxExpr>,
+        span: Span,
+    },
+    Sigma {
+        binder: SyntaxBinder,
+        codomain: Box<SyntaxExpr>,
+        span: Span,
+    },
+    Eval {
+        expr: Box<SyntaxExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyntaxBinder {
-    Explicit(String, Box<SyntaxExpr>),
-    Implicit(String, Box<SyntaxExpr>),
-    Instance(String, Box<SyntaxExpr>),
+    Explicit(Span, String, Box<SyntaxExpr>),
+    Implicit(Span, String, Box<SyntaxExpr>),
+    Instance(Span, String, Box<SyntaxExpr>),
+}
+
+impl Spanned for SyntaxExpr {
+    fn span(&self) -> Span {
+        match self {
+            SyntaxExpr::Root(_) => Span {
+                file: 0,
+                start: 0,
+                end: 0,
+            },
+            SyntaxExpr::Def { span, .. } => *span,
+            SyntaxExpr::Var { span, .. } => *span,
+            SyntaxExpr::Constructor { span, .. } => *span,
+            SyntaxExpr::App { span, .. } => *span,
+            SyntaxExpr::Lambda { span, .. } => *span,
+            SyntaxExpr::Let { span, .. } => *span,
+            SyntaxExpr::Lit { span, .. } => *span,
+            SyntaxExpr::Tuple { span, .. } => *span,
+            SyntaxExpr::Proj { span, .. } => *span,
+            SyntaxExpr::Hole(span) => *span,
+            SyntaxExpr::Arrow { span, .. } => *span,
+            SyntaxExpr::Array { span, .. } => *span,
+            SyntaxExpr::Pi { span, .. } => *span,
+            SyntaxExpr::Sigma { span, .. } => *span,
+            SyntaxExpr::Eval { span, .. } => *span,
+        }
+    }
+}
+
+impl Spanned for SyntaxBinder {
+    fn span(&self) -> Span {
+        match self {
+            SyntaxBinder::Explicit(span, ..) => *span,
+            SyntaxBinder::Implicit(span, ..) => *span,
+            SyntaxBinder::Instance(span, ..) => *span,
+        }
+    }
 }
