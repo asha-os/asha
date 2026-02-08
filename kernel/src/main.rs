@@ -1,15 +1,19 @@
 #![no_std]
 #![no_main]
 
-use crate::{idt::{enable_interrupts, init_idt}, pic::init_pic};
+use crate::{
+    idt::{enable_interrupts, init_idt},
+    pic::init_pic, text::{TextWriter, color::{Color, ColorCode}},
+};
 
 extern crate alloc;
 extern crate common;
 extern crate runtime;
 
-pub mod idt;
 pub mod heap;
+pub mod idt;
 pub mod pic;
+pub mod text;
 
 #[repr(C)]
 pub struct MemoryMapInfo {
@@ -19,6 +23,7 @@ pub struct MemoryMapInfo {
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct FramebufferInfo {
     pub base: u64,
     pub size: usize,
@@ -26,6 +31,21 @@ pub struct FramebufferInfo {
     pub height: u32,
     pub stride: u32,
     pub pixel_format: u32,
+}
+
+impl FramebufferInfo {
+    pub fn bytes_per_pixel(&self) -> usize {
+        4
+    }
+    pub fn width(&self) -> usize {
+        self.width as usize
+    }
+    pub fn height(&self) -> usize {
+        self.height as usize
+    }
+    pub fn stride(&self) -> usize {
+        self.stride as usize
+    }
 }
 
 #[repr(C)]
@@ -107,13 +127,20 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     let (free_region, free_size) = find_free_region(&info.memory_map);
     heap::init_heap(free_region, free_size);
 
-    let fb = info.framebuffer.base as *mut u32;
-    let pixels = (info.framebuffer.stride * info.framebuffer.height) as usize;
-    for i in 0..pixels {
-        unsafe {
-            *fb.add(i) = 0x0000FF00;
-        }
-    }
+    let fb_buffer = unsafe {
+        core::slice::from_raw_parts_mut(
+            info.framebuffer.base as *mut u8,
+            info.framebuffer.size,
+        )
+    };
+    let mut text_writer = TextWriter::new_framebuffer_writer(
+        fb_buffer,
+        info.framebuffer.clone(),
+        ColorCode::new(Color::White, Color::Black)
+    );
+    text_writer.write_string("Hello, world!");
+    text_writer.new_line();
+    text_writer.write_string("Welcome!");
 
     loop {}
 }

@@ -10,3 +10,4 @@ api.workspace = true
 runtime.workspace = true
 talc.workspace = true
 spin.workspace = true
+lazy_static.workspace = true
