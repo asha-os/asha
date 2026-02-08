@@ -153,6 +153,20 @@ pub extern "efiapi" fn efi_main(
 
     print(con_out, "Exiting boot services...\r\n");
 
+    let mut boot_info_ptr: *mut core::ffi::c_void = core::ptr::null_mut();
+    let status = unsafe {
+        (bs.allocate_pool)(
+            efi::LOADER_DATA,
+            core::mem::size_of::<BootInfo>(),
+            &mut boot_info_ptr,
+        )
+    };
+    if status != efi::Status::SUCCESS {
+        print(con_out, "Failed to allocate BootInfo\r\n");
+        return status;
+    }
+    let boot_info = boot_info_ptr as *mut BootInfo;
+
     let mut mmap_size: usize = 0;
     let mut mmap_key: usize = 0;
     let mut desc_size: usize = 0;
@@ -192,22 +206,27 @@ pub extern "efiapi" fn efi_main(
 
     let entry_count = mmap_size / desc_size;
 
-    let boot_info = BootInfo {
-        memory_map: MemoryMapInfo {
+    unsafe {
+        (*boot_info).memory_map = MemoryMapInfo {
             entries: mmap_buf as *const u8,
             entry_count,
             entry_size: desc_size,
-        },
-        framebuffer,
-    };
+        };
+        (*boot_info).framebuffer = framebuffer;
+    }
 
     let status = unsafe { (bs.exit_boot_services)(image_handle, mmap_key) };
     if status != efi::Status::SUCCESS {
         loop {}
     }
 
+    #[cfg(target_arch = "x86_64")]
+    let entry: extern "sysv64" fn(*const BootInfo) -> ! =
+        unsafe { core::mem::transmute(kernel_ptr) };
+    #[cfg(target_arch = "aarch64")] // todo: this is probably wrong
     let entry: extern "C" fn(*const BootInfo) -> ! = unsafe { core::mem::transmute(kernel_ptr) };
-    entry(&boot_info);
+
+    entry(boot_info);
 }
 
 fn print(con_out: &mut efi::protocols::simple_text_output::Protocol, s: &str) {

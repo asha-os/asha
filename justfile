@@ -23,7 +23,7 @@ build:
     cargo build -p kernel --target {{ kernel_target }} -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem -Zjson-target-spec
     mkdir -p esp/EFI/BOOT
     cp -f target/x86_64-unknown-uefi/debug/bootloader.efi esp/EFI/BOOT/{{ boot_efi }}
-    cp -f {{ kernel_out }} esp/kernel.bin
+    rust-objcopy -O binary {{ kernel_out }} esp/kernel.bin
 
 [windows]
 build:
@@ -31,7 +31,7 @@ build:
     cargo build -p kernel --target {{ kernel_target }} -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem -Zjson-target-spec
     if not exist esp\EFI\BOOT mkdir esp\EFI\BOOT
     copy /Y target\x86_64-unknown-uefi\debug\bootloader.efi esp\EFI\BOOT\{{ boot_efi }}
-    copy /Y {{ replace(kernel_out, "/", "\\") }} esp\kernel.bin
+    rust-objcopy -O binary {{ replace(kernel_out, "/", "\\") }} esp\kernel.bin
 
 run: build
-    {{ qemu }} -bios {{ ovmf }} -drive format=raw,file=fat:rw:esp
+    {{ qemu }} -bios {{ ovmf }} -drive format=raw,file=fat:rw:esp -serial stdio

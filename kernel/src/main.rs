@@ -29,6 +29,15 @@ pub struct BootInfo {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start(_boot_info: *const BootInfo) -> ! {
+pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
+    let info = unsafe { &*boot_info };
+    let fb = info.framebuffer.base as *mut u32;
+    let pixels = (info.framebuffer.stride * info.framebuffer.height) as usize;
+    for i in 0..pixels {
+        unsafe {
+            *fb.add(i) = 0x0000FF00;
+        }
+    }
+
     loop {}
 }
