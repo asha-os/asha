@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use core::ptr;
 
 #[cfg(target_os = "windows")]
