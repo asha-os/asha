@@ -1,7 +1,0 @@
-def type_implicit {a : Type} {n : Nat} (arr : Array a n) : Type = a
-
-def type_explicit (a : Type) (n : Nat) (arr : Array a n) : Type = a
-
-eval type_implicit [5,4,3,2,1];
-
-eval type_explicit Nat 5 [5,4,3,2,1];

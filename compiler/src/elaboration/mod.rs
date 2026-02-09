@@ -25,7 +25,10 @@ use crate::{
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term},
-    syntax::{Span, Spanned, tree::{SyntaxBinder, SyntaxExpr}},
+    syntax::{
+        Span, Spanned,
+        tree::{SyntaxBinder, SyntaxExpr},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -36,7 +39,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    // todo: remove
+    // todo: review
     pub fn pre_loaded(module_id: ModuleId) -> Self {
         let mut externals = BTreeMap::new();
         externals.insert(PRIM_NAT, Term::Sort(Level::Zero));
@@ -73,14 +76,22 @@ impl Environment {
     }
 
     pub fn lookup_string(&self, name: &str) -> Option<&Declaration> {
-        self.decls.values().find(|decl| match decl {
-            Declaration::Definition {
-                name: decl_name, ..
-            } => decl_name.display() == Some(name),
-            Declaration::Constructor {
-                name: decl_name, ..
-            } => decl_name.display() == Some(name),
-        })
+        self.decls
+            .values()
+            .find(|decl| decl.name().display() == Some(name))
+    }
+
+    pub fn lookup_type_by_name(&self, name: &str) -> Option<(&QualifiedName, &Term)> {
+        self.decls
+            .values()
+            .find(|decl| decl.name().display() == Some(name))
+            .map(|decl| (decl.name(), decl.type_()))
+            .or_else(|| {
+                self.externals
+                    .iter()
+                    .find(|(n, _)| n.display() == Some(name))
+                    .map(|(n, t)| (n, t))
+            })
     }
 }
 
@@ -165,7 +176,7 @@ impl ElabState {
                 binders,
                 return_type,
                 body,
-                span
+                span,
             } => self.elaborate_def(name, binders, return_type, body, *span),
             SyntaxExpr::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
@@ -181,7 +192,7 @@ impl ElabState {
         binders: &[SyntaxBinder],
         return_type: &SyntaxExpr,
         body: &SyntaxExpr,
-        span: Span
+        span: Span,
     ) {
         let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
@@ -216,7 +227,7 @@ impl ElabState {
                 name: def_name,
                 type_: pi_type,
                 value,
-                span
+                span,
             },
         );
 
@@ -248,16 +259,8 @@ impl ElabState {
                     return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
 
-                if let Some(decl) = self.env.lookup_string(name) {
-                    match decl {
-                        Declaration::Definition { type_, .. } => {
-                            return (Term::Const(decl.name().clone()), type_.clone());
-                        }
-                        _ => panic!(
-                            "unexpected non-definition declaration for variable {}",
-                            name
-                        ),
-                    }
+                if let Some((name, type_)) = self.env.lookup_type_by_name(name) {
+                    return (Term::Const(name.clone()), type_.clone());
                 }
 
                 self.errors.push(ElabError::new(
@@ -271,23 +274,14 @@ impl ElabState {
                 Term::Sort(Level::Succ(Box::new(Level::Zero))),
             ),
             SyntaxExpr::Constructor { name, .. } => {
-                if let Some(decl) = self.env.lookup_string(name) {
-                    match decl {
-                        Declaration::Constructor { type_, .. } => {
-                            return (Term::Const(decl.name().clone()), type_.clone());
-                        }
-                        _ => panic!(
-                            "unexpected non-constructor declaration for constructor {}",
-                            name
-                        ),
-                    }
+                if let Some((name, type_)) = self.env.lookup_type_by_name(name) {
+                    return (Term::Const(name.clone()), type_.clone());
                 }
 
-                self.errors
-                    .push(ElabError::new(
-                        ElabErrorKind::UndefinedConstructor(name.clone()),
-                        syntax.span(),
-                    ));
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::UndefinedConstructor(name.clone()),
+                    syntax.span(),
+                ));
                 (self.erroneous_term(), self.erroneous_term())
             }
             SyntaxExpr::Lit { value, .. } => {

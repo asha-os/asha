@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use alloc::{boxed::Box, format, string::{String, ToString}};
+use alloc::{boxed::Box, string::{String, ToString}};
 use miette::{Diagnostic, LabeledSpan};
 use crate::syntax::Span;
 

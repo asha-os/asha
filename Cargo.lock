@@ -118,7 +118,7 @@ dependencies = [
 [[package]]
 name = "miette"
 version = "7.6.0"
-source = "git+https://github.com/asha-os/miette?branch=no-std#add344980d77f3971cc4d78f9901493548f38995"
+source = "git+https://github.com/huitseeker/miette?branch=no-std#f346d78d21b91f4a552ec9cb453c2c2b0f955b98"
 dependencies = [
  "cfg-if",
  "owo-colors",

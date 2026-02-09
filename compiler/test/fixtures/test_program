@@ -1,5 +1,7 @@
-def dimension {n : Nat} (s : Fin n) : Nat = n
+def type_implicit {a : Type} {n : Nat} (arr : Array a n) : Type = a
 
-def type {a : Type} (arr : Array a) : Type = a
+def type_explicit (a : Type) (n : Nat) (arr : Array a n) : Type = a
 
-def test_type : Type = type Nat [5,4,3,2,1]
+eval type_implicit [5,4,3,2,1];
+
+eval type_explicit Nat 5 [5,4,3,2,1];
