@@ -178,6 +178,12 @@ impl ElabState {
                 body,
                 span,
             } => self.elaborate_def(name, binders, return_type, body, *span),
+            SyntaxExpr::Record {
+                name,
+                binders,
+                fields,
+                span,
+            } => self.elaborate_record(name, binders, fields, *span),
             SyntaxExpr::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", pretty_term(&term));
@@ -377,6 +383,63 @@ impl ElabState {
 
     fn unify(&mut self, a: &Term, b: &Term) -> bool {
         unify::is_def_eq(self, a, b)
+    }
+
+    fn elaborate_record(
+        &mut self,
+        name: &str,
+        binders: &[SyntaxBinder],
+        fields: &[SyntaxExpr],
+        span: Span,
+    ) {
+        let record_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        // todo: remove code duplication
+        let saved_lctx = self.lctx.clone();
+        let mut binder_fvars: Vec<(Unique, BinderInfo, Term)> = Vec::new();
+
+        for binder in binders {
+            let (binder_name, binder_type_syntax, info) = match binder {
+                SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
+                SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
+                SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+            };
+            let elaborated_type = self.elaborate_term(binder_type_syntax, None);
+            let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
+            binder_fvars.push((fvar, info, elaborated_type));
+        }
+        let mut field_types: Vec<(String, Term)> = Vec::new();
+        for field in fields {
+            match field {
+                SyntaxExpr::RecordField { name, type_ann, .. } => {
+                    let elaborated_type = self.elaborate_term(type_ann, None);
+                    field_types.push((name.clone(), elaborated_type));
+                }
+                _ => {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::UnsupportedSyntax(field.clone()),
+                        field.span(),
+                    ));
+                }
+            }
+        }
+
+        let mut pi_type = Term::Sort(Level::Zero);
+        for (fvar, info, ty) in binder_fvars.into_iter().rev() {
+            pi_type = subst::abstract_fvar(&pi_type, fvar.clone());
+            pi_type = Term::Pi(info, Box::new(ty), Box::new(pi_type));
+        }
+        println!("Elaborated record '{}' with type: {}", name, &pi_type);
+
+        self.env.decls.insert(
+            record_name.clone(),
+            Declaration::Constructor {
+                name: record_name,
+                type_: pi_type,
+                span,
+            },
+        );
+
+        self.lctx = saved_lctx;
     }
 }
 

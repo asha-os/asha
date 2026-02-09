@@ -1,0 +1,11 @@
+record Person {
+    name : Str,
+    age : Nat,
+}
+
+record Expr (a : Type) (n : Nat) {
+    value : a,
+    size : Fin n
+}
+
+def expr_type {a : Type} {n : Nat} : Type = Expr a n

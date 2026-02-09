@@ -8,7 +8,11 @@ use chumsky::{input::Input, prelude::*};
 use crate::{
     spine::Literal,
     syntax::{
-        Span, Spanned, error::{ParseError, ParseErrorKind}, spanning, token::{Token, TokenKind}, tree::{SyntaxBinder, SyntaxExpr as Expr}
+        Span, Spanned,
+        error::{ParseError, ParseErrorKind},
+        spanning,
+        token::{Token, TokenKind},
+        tree::{SyntaxBinder, SyntaxExpr as Expr},
     },
 };
 
@@ -68,12 +72,58 @@ pub fn parse<'a>(
 fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
     let mut expr = Recursive::declare();
 
-    let def = choice((def_parser(expr.clone()), eval_parser(expr.clone())));
+    let def = choice((
+        def_parser(expr.clone()),
+        eval_parser(expr.clone()),
+        record_parser(expr.clone()),
+    ));
 
     expr.define(expr_impl(expr.clone()));
 
     let defs = def.repeated().collect();
     defs.map(Expr::Root)
+}
+
+fn record_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+    just_token(TokenKind::Record)
+        .then(just_token(TokenKind::UpperIdentifier))
+        .then(
+            binder(expr.clone())
+                .repeated()
+                .collect::<Vec<_>>()
+                .then_ignore(just_token(TokenKind::LBrace))
+                .then(record_fields_parser(expr))
+                .then_ignore(just_token(TokenKind::Comma).or_not())
+                .then(just_token(TokenKind::RBrace)),
+        )
+        .map(|((record_tok, name_tok), ((binders, fields), rbraces))| Expr::Record {
+            span: spanning(&record_tok, &rbraces),
+            name: lexeme_to_string(name_tok.lexeme),
+            binders,
+            fields,
+        })
+}
+
+fn record_fields_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
+    just_token(TokenKind::LowerIdentifier)
+        .then_ignore(just_token(TokenKind::Colon))
+        .then(expr)
+        .separated_by(just_token(TokenKind::Comma))
+        .collect::<Vec<_>>()
+        .map(|fields| {
+            fields
+                .into_iter()
+                .map(|(name, ty)| Expr::RecordField {
+                    span: spanning(&name, &ty),
+                    name: lexeme_to_string(name.lexeme),
+                    type_ann: Box::new(ty),
+                })
+                .collect()
+        })
 }
 
 fn def_parser<'a>(
