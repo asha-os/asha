@@ -6,3 +6,4 @@ pub const PRIM_STRING: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::S
 pub const PRIM_ARRAY: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::Array);
 pub const PRIM_ARRAY_NIL: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::ArrayNil);
 pub const PRIM_ARRAY_CONS: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::ArrayCons);
+pub const PRIM_IO: QualifiedName = QualifiedName::Intrinsic(IntrinsicName::IO);

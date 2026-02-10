@@ -23,6 +23,7 @@ pub enum IntrinsicName {
     Array,
     ArrayNil,
     ArrayCons,
+    IO,
 }
 
 impl IntrinsicName {
@@ -34,6 +35,7 @@ impl IntrinsicName {
             IntrinsicName::Array => "Array",
             IntrinsicName::ArrayNil => "Array.nil",
             IntrinsicName::ArrayCons => "Array.cons",
+            IntrinsicName::IO => "IO",
         }
     }
 }

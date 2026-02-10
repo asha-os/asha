@@ -100,6 +100,11 @@ pub enum SyntaxExpr {
         value: Box<SyntaxExpr>,
         span: Span,
     },
+    Extern {
+        name: String,
+        type_ann: Box<SyntaxExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +141,7 @@ impl Spanned for SyntaxExpr {
             SyntaxExpr::RecordField { span, .. } => *span,
             SyntaxExpr::RecordLiteral { span, .. } => *span,
             SyntaxExpr::RecordLiteralField { span, .. } => *span,
+            SyntaxExpr::Extern { span, .. } => *span,
         }
     }
 }

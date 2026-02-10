@@ -76,6 +76,7 @@ fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
         def_parser(expr.clone()),
         eval_parser(expr.clone()),
         record_parser(expr.clone()),
+        extern_parser(expr.clone()),
     ));
 
     expr.define(expr_impl(expr.clone()));
@@ -163,6 +164,20 @@ fn eval_parser<'a>(
         })
 }
 
+fn extern_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+    just_token(TokenKind::Extern)
+        .then(just_token(TokenKind::LowerIdentifier))
+        .then_ignore(just_token(TokenKind::Colon))
+        .then(expr)
+        .map(|((extern_tok, name), ty)| Expr::Extern {
+            span: spanning(&extern_tok, &ty),
+            name: lexeme_to_string(name.lexeme),
+            type_ann: Box::new(ty),
+        })
+}
+
 fn binder<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, SyntaxBinder, ParserExtra<'a>> + Clone {
@@ -244,9 +259,10 @@ fn expr_impl<'a>(
         )
         .map(|(lhs, rest)| match rest {
             None => lhs,
-            Some((true, rhs)) => Expr::Array {
+            Some((true, rhs)) => Expr::Arrow {
                 span: spanning(&lhs, &rhs),
-                elements: alloc::vec![lhs, rhs],
+                param_type: Box::new(lhs),
+                return_type: Box::new(rhs),
             },
             Some((false, rhs)) => Expr::Sigma {
                 span: spanning(&lhs, &rhs),

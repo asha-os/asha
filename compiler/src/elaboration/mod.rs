@@ -21,7 +21,7 @@ use crate::{
     module::{
         ModuleId,
         name::QualifiedName,
-        prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_NAT, PRIM_STRING},
+        prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_IO, PRIM_NAT, PRIM_STRING},
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term},
@@ -46,9 +46,6 @@ impl Namespace {
     }
 
     pub fn lookup_decl(&self, name: &str) -> Option<&QualifiedName> {
-        if name.starts_with("$") {
-            return None;
-        }
         self.decls.get(name)
     }
 
@@ -103,11 +100,20 @@ impl Environment {
                 )),
             ),
         );
+        externals.insert(
+            PRIM_IO,
+            Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(Term::Sort(Level::Zero)),
+                Box::new(Term::Sort(Level::Zero)),
+            ),
+        );
         let mut root_namespace = Namespace::new();
         root_namespace.decls.insert("Nat".into(), PRIM_NAT);
         root_namespace.decls.insert("Str".into(), PRIM_STRING);
         root_namespace.decls.insert("Fin".into(), PRIM_FIN);
         root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
+        root_namespace.decls.insert("IO".into(), PRIM_IO);
         Self {
             module_id,
             externals,
@@ -251,9 +257,14 @@ impl ElabState {
                 fields,
                 span,
             } => self.elaborate_record(name, binders, fields, *span),
+            SyntaxExpr::Extern {
+                name,
+                type_ann,
+                span,
+            } => self.elaborate_extern(name, type_ann, *span),
             SyntaxExpr::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
-                println!("Evaluated term: {:#?}", pretty_term(&term));
+                println!("Evaluated term: {:#?}", &term);
             }
             _ => (),
         }
@@ -444,6 +455,18 @@ impl ElabState {
                         return (self.erroneous_term(), self.erroneous_term());
                     }
                 }
+            },
+            SyntaxExpr::Arrow { param_type, return_type, .. } => {
+                let elaborated_param_type = self.elaborate_term(param_type, None);
+                let elaborated_return_type = self.elaborate_term(return_type, None);
+                (
+                    Term::Pi(
+                        BinderInfo::Explicit,
+                        Box::new(elaborated_param_type.clone()),
+                        Box::new(elaborated_return_type.clone()),
+                    ),
+                    Term::Sort(Level::Zero),
+                )
             }
             u => {
                 self.errors.push(ElabError::new(
@@ -558,6 +581,13 @@ impl ElabState {
         };
         ns.decls.insert(display_name.into(), qname);
     }
+
+    fn elaborate_extern(&mut self, name: &str, type_ann: &SyntaxExpr, _span: Span) {
+        let elaborated_type = self.elaborate_term(type_ann, None);
+        let qname = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        self.env.externals.insert(qname.clone(), elaborated_type);
+        self.register_in_namespace(name, qname);
+   }
 }
 
 pub fn elaborate_file(

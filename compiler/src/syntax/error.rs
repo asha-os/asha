@@ -123,6 +123,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Equal => write!(f, "`=`"),
             TokenKind::Struct => write!(f, "`struct`"),
             TokenKind::Record => write!(f, "`record`"),
+            TokenKind::Extern => write!(f, "`extern`"),
             TokenKind::Comma => write!(f, "`,`"),
             TokenKind::Colon => write!(f, "`:`"),
             TokenKind::DoubleColon => write!(f, "`::`"),

@@ -17,6 +17,7 @@ pub enum TokenKind {
     Struct,
     Eval,
     Record,
+    Extern,
     Comma,
     Colon,
     DoubleColon,
