@@ -1,3 +1,12 @@
 extern puts : Str -> IO ()
 
 def main : IO () = puts "Hello, World!"
+
+inductive ScottNat {
+    zero : ScottNat,
+    succ : ScottNat -> ScottNat
+}
+
+def trulyZero : ScottNat = ScottNat::zero
+
+def trulyOne : ScottNat = ScottNat::succ trulyZero

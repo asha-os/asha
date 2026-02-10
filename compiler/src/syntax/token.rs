@@ -18,6 +18,7 @@ pub enum TokenKind {
     Eval,
     Record,
     Extern,
+    Inductive,
     Comma,
     Colon,
     DoubleColon,

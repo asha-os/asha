@@ -106,6 +106,18 @@ pub enum SyntaxExpr {
         type_ann: Box<SyntaxExpr>,
         span: Span,
     },
+    Inductive {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        constructors: Vec<SyntaxExpr>,
+        span: Span,
+    },
+    InductiveConstructor {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        type_ann: Option<Box<SyntaxExpr>>,
+        span: Span,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +156,8 @@ impl Spanned for SyntaxExpr {
             SyntaxExpr::RecordLiteralField { span, .. } => *span,
             SyntaxExpr::Extern { span, .. } => *span,
             SyntaxExpr::Unit(span) => *span,
+            SyntaxExpr::Inductive { span, .. } => *span,
+            SyntaxExpr::InductiveConstructor { span, .. } => *span,
         }
     }
 }

@@ -113,6 +113,7 @@ impl<'a> Iterator for Lexer<'a> {
                     b"eval" => TokenKind::Eval,
                     b"record" => TokenKind::Record,
                     b"extern" => TokenKind::Extern,
+                    b"inductive" => TokenKind::Inductive,
                     _ if is_upper => TokenKind::UpperIdentifier,
                     _ => TokenKind::LowerIdentifier,
                 };

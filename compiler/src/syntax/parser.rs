@@ -77,6 +77,7 @@ fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
         eval_parser(expr.clone()),
         record_parser(expr.clone()),
         extern_parser(expr.clone()),
+        inductive_parser(expr.clone()),
     ));
 
     expr.define(expr_impl(expr.clone()));
@@ -149,6 +150,59 @@ fn def_parser<'a>(
             binders,
             return_type: Box::new(ret_type),
             body: Box::new(body),
+        })
+}
+
+fn inductive_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+    just_token(TokenKind::Inductive)
+        .then(just_token(TokenKind::UpperIdentifier))
+        .then(
+            binder(expr.clone())
+                .repeated()
+                .collect::<Vec<_>>()
+                .then_ignore(just_token(TokenKind::LBrace))
+                .then(inductive_constructors_parser(expr))
+                .then_ignore(just_token(TokenKind::Comma).or_not())
+                .then(just_token(TokenKind::RBrace)),
+        )
+        .map(
+            |((inductive_tok, name_tok), ((binders, constructors), rbraces))| Expr::Inductive {
+                span: spanning(&inductive_tok, &rbraces),
+                name: lexeme_to_string(name_tok.lexeme),
+                binders,
+                constructors,
+            },
+        )
+}
+
+fn inductive_constructors_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
+    just_token(TokenKind::LowerIdentifier)
+        .then(
+            binder(expr.clone())
+                .repeated()
+                .collect::<Vec<_>>()
+                .then(
+                    just_token(TokenKind::Colon)
+                        .ignore_then(expr.clone())
+                        .or_not(),
+                )
+        )
+        .separated_by(just_token(TokenKind::Comma))
+        .collect::<Vec<_>>()
+        .map(|constructors| {
+            constructors
+                .into_iter()
+                .map(|(name, (binders, ty))| Expr::InductiveConstructor {
+                    span: name.span, // todo: extend this
+                    name: lexeme_to_string(name.lexeme),
+                    binders,
+                    type_ann: ty.map(Box::new),
+                })
+                .collect()
         })
 }
 

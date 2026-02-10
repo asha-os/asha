@@ -124,6 +124,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Struct => write!(f, "`struct`"),
             TokenKind::Record => write!(f, "`record`"),
             TokenKind::Extern => write!(f, "`extern`"),
+            TokenKind::Inductive => write!(f, "`inductive`"),
             TokenKind::Comma => write!(f, "`,`"),
             TokenKind::Colon => write!(f, "`:`"),
             TokenKind::DoubleColon => write!(f, "`::`"),

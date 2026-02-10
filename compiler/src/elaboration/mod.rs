@@ -20,7 +20,9 @@ use crate::{
     module::{
         ModuleId,
         name::QualifiedName,
-        prim::{PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_IO, PRIM_NAT, PRIM_STRING},
+        prim::{
+            PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_IO, PRIM_NAT, PRIM_STRING,
+        },
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term},
@@ -261,6 +263,12 @@ impl ElabState {
                 type_ann,
                 span,
             } => self.elaborate_extern(name, type_ann, *span),
+            SyntaxExpr::Inductive {
+                name,
+                binders,
+                constructors,
+                span,
+            } => self.elaborate_inductive(name, binders, constructors, *span),
             SyntaxExpr::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", &term);
@@ -454,8 +462,12 @@ impl ElabState {
                         return (self.erroneous_term(), self.erroneous_term());
                     }
                 }
-            },
-            SyntaxExpr::Arrow { param_type, return_type, .. } => {
+            }
+            SyntaxExpr::Arrow {
+                param_type,
+                return_type,
+                ..
+            } => {
                 let elaborated_param_type = self.elaborate_term(param_type, None);
                 let elaborated_return_type = self.elaborate_term(return_type, None);
                 (
@@ -587,7 +599,130 @@ impl ElabState {
         let qname = QualifiedName::User(self.gen_.fresh(name.to_string()));
         self.env.externals.insert(qname.clone(), elaborated_type);
         self.register_in_namespace(name, qname);
-   }
+    }
+
+    fn elaborate_inductive(
+        &mut self,
+        name: &str,
+        binders: &[SyntaxBinder],
+        constructors: &[SyntaxExpr],
+        span: Span,
+    ) {
+        let name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let saved_lctx = self.lctx.clone();
+        
+        // todo: remove code duplication
+        let mut binder_fvars: Vec<(Unique, BinderInfo, Term)> = Vec::new();
+        for binder in binders {
+            let (binder_name, binder_type_syntax, info) = match binder {
+                SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
+                SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
+                SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+            };
+            let elaborated_type = self.elaborate_term(binder_type_syntax, None);
+            let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
+            binder_fvars.push((fvar, info, elaborated_type));
+        }
+        
+        let mut inductive_type = Term::Sort(Level::Zero);
+        for (fvar, info, ty) in binder_fvars.iter().rev() {
+            inductive_type = subst::abstract_fvar(&inductive_type, fvar.clone());
+            inductive_type = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(inductive_type));
+        }
+        self.env.decls.insert(
+            name.clone(),
+            Declaration::Constructor {
+                name: name.clone(),
+                type_: inductive_type,
+                span,
+            },
+        );
+        
+        self.register_in_namespace(&name.display().unwrap(), name.clone());
+        let mut namespace = Namespace::new(); // todo: handle existing one
+        self.elaborate_inductive_constructors(
+            &mut namespace,
+            &name,
+            &binder_fvars,
+            constructors,
+        );
+        if let Some(existing) = self.env.root_namespace.children.get_mut(&name.display().unwrap().to_string()) {
+            existing.decls.extend(namespace.decls);
+            existing.children.extend(namespace.children);
+        } else {
+            self.env.root_namespace.children.insert(name.display().unwrap().to_string(), namespace);
+        }
+        
+        self.lctx = saved_lctx;
+    }
+    
+    fn elaborate_inductive_constructors(
+        &mut self,
+        inductive_namespace: &mut Namespace,
+        inductive_name: &QualifiedName,
+        binders: &[(Unique, BinderInfo, Term)],
+        constructors: &[SyntaxExpr],
+    ) {
+        for constructor in constructors {
+            match constructor {
+                SyntaxExpr::InductiveConstructor {
+                    name,
+                    binders: ctor_binders,
+                    type_ann,
+                    span,
+                } => {
+                    let ctor_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+                    let saved_lctx = self.lctx.clone();
+                    
+                    let mut binder_fvars: Vec<(Unique, BinderInfo, Term)> = Vec::new();
+                    for binder in ctor_binders {
+                        let (binder_name, binder_type_syntax, info) = match binder {
+                            SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
+                            SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
+                            SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+                        };
+                        let elaborated_type = self.elaborate_term(binder_type_syntax, None);
+                        let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
+                        binder_fvars.push((fvar, info, elaborated_type));
+                    }
+                    
+                    let mut constructor_type = if let Some(type_ann) = type_ann {
+                        self.elaborate_term(type_ann, None)
+                    } else {
+                        Term::Const(inductive_name.clone())
+                    };
+                    
+                    for (fvar, info, ty) in binder_fvars.iter().rev() {
+                        constructor_type = subst::abstract_fvar(&constructor_type, fvar.clone());
+                        constructor_type = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(constructor_type));
+                    }
+                    
+                    for (fvar, info, ty) in binders.iter().rev() {
+                        constructor_type = subst::abstract_fvar(&constructor_type, fvar.clone());
+                        constructor_type = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(constructor_type));
+                    }
+                    
+                    self.env.decls.insert(
+                        ctor_name.clone(),
+                        Declaration::Constructor {
+                            name: ctor_name.clone(),
+                            type_: constructor_type,
+                            span: *span,
+                        },
+                    );
+                    
+                    inductive_namespace.decls.insert(name.clone(), ctor_name);
+                    self.lctx = saved_lctx;
+                }
+                _ => {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::UnsupportedSyntax(constructor.clone()),
+                        constructor.span(),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 pub fn elaborate_file(
