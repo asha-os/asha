@@ -9,3 +9,5 @@ record Expr (a : Type) (n : Nat) {
 }
 
 def expr_type {a : Type} {n : Nat} : Type = Expr a n
+
+def expr_value {a : Type} {n : Nat} (value : a) (size : Fin n) : Expr = Expr::new a n value size

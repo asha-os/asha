@@ -17,10 +17,12 @@ pub enum SyntaxExpr {
         span: Span,
     },
     Var {
-        name: String,
+        namespace: Vec<String>,
+        member: String,
         span: Span,
     },
     Constructor {
+        namespace: Vec<String>,
         name: String,
         span: Span,
     },

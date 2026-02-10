@@ -218,11 +218,20 @@ impl<'a> Iterator for Lexer<'a> {
             }
             ':' => {
                 self.cursor.advance(1);
-                Some(Ok(Token {
-                    kind: TokenKind::Colon,
-                    lexeme: &source[start..self.cursor.byte_offset],
-                    span: self.cursor.span_from(start),
-                }))
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b':' {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::DoubleColon,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                } else {
+                    Some(Ok(Token {
+                        kind: TokenKind::Colon,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                }
             }
             '{' => {
                 self.cursor.advance(1);

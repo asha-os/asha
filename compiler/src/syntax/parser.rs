@@ -98,12 +98,14 @@ fn record_parser<'a>(
                 .then_ignore(just_token(TokenKind::Comma).or_not())
                 .then(just_token(TokenKind::RBrace)),
         )
-        .map(|((record_tok, name_tok), ((binders, fields), rbraces))| Expr::Record {
-            span: spanning(&record_tok, &rbraces),
-            name: lexeme_to_string(name_tok.lexeme),
-            binders,
-            fields,
-        })
+        .map(
+            |((record_tok, name_tok), ((binders, fields), rbraces))| Expr::Record {
+                span: spanning(&record_tok, &rbraces),
+                name: lexeme_to_string(name_tok.lexeme),
+                binders,
+                fields,
+            },
+        )
 }
 
 fn record_fields_parser<'a>(
@@ -317,13 +319,53 @@ fn expr_impl<'a>(
 fn expr_atom<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone {
+    let ident = choice((
+        just_token(TokenKind::LowerIdentifier),
+        just_token(TokenKind::UpperIdentifier),
+    ));
+
+    let qualified = ident
+        .clone()
+        .then(
+            just_token(TokenKind::DoubleColon)
+                .ignore_then(ident.clone())
+                .repeated()
+                .at_least(1)
+                .collect::<Vec<_>>(),
+        )
+        .map(|(first, rest)| {
+            let mut namespace = alloc::vec![lexeme_to_string(first.lexeme)];
+            let last = rest.last().unwrap();
+            let span = spanning(&first, last);
+            let is_upper = last.kind == TokenKind::UpperIdentifier;
+            for tok in &rest[..rest.len() - 1] {
+                namespace.push(lexeme_to_string(tok.lexeme));
+            }
+            let member = lexeme_to_string(last.lexeme);
+            if is_upper {
+                Expr::Constructor {
+                    name: member,
+                    namespace,
+                    span,
+                }
+            } else {
+                Expr::Var {
+                    namespace,
+                    member,
+                    span,
+                }
+            }
+        });
+
     let var = just_token(TokenKind::LowerIdentifier).map(|t| Expr::Var {
-        name: lexeme_to_string(t.lexeme),
+        namespace: Vec::new(),
+        member: lexeme_to_string(t.lexeme),
         span: t.span,
     });
 
     let constructor = just_token(TokenKind::UpperIdentifier).map(|t| Expr::Constructor {
         name: lexeme_to_string(t.lexeme),
+        namespace: Vec::new(),
         span: t.span,
     });
 
@@ -378,6 +420,7 @@ fn expr_atom<'a>(
         });
 
     choice((
+        qualified,
         var,
         constructor,
         number,

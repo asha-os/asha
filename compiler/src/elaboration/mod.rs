@@ -32,10 +32,46 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct Namespace {
+    pub decls: BTreeMap<String, QualifiedName>,
+    pub children: BTreeMap<String, Namespace>,
+}
+
+impl Namespace {
+    pub fn new() -> Self {
+        Self {
+            decls: BTreeMap::new(),
+            children: BTreeMap::new(),
+        }
+    }
+
+    pub fn lookup_decl(&self, name: &str) -> Option<&QualifiedName> {
+        self.decls.get(name)
+    }
+
+    pub fn child(&self, name: &str) -> Option<&Namespace> {
+        self.children.get(name)
+    }
+
+    pub fn walk(&self, path: &[String]) -> Option<&Namespace> {
+        let mut current = self;
+        for segment in path {
+            current = current.children.get(segment)?;
+        }
+        Some(current)
+    }
+
+    pub fn resolve(&self, path: &[String], member: &str) -> Option<&QualifiedName> {
+        self.walk(path)?.lookup_decl(member)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Environment {
     pub module_id: ModuleId,
     pub externals: BTreeMap<QualifiedName, Term>,
     pub decls: BTreeMap<QualifiedName, Declaration>,
+    pub root_namespace: Namespace,
 }
 
 impl Environment {
@@ -64,10 +100,16 @@ impl Environment {
                 )),
             ),
         );
+        let mut root_namespace = Namespace::new();
+        root_namespace.decls.insert("Nat".into(), PRIM_NAT);
+        root_namespace.decls.insert("Str".into(), PRIM_STRING);
+        root_namespace.decls.insert("Fin".into(), PRIM_FIN);
+        root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
         Self {
             module_id,
             externals,
             decls: BTreeMap::new(),
+            root_namespace,
         }
     }
 
@@ -75,23 +117,11 @@ impl Environment {
         self.decls.get(name)
     }
 
-    pub fn lookup_string(&self, name: &str) -> Option<&Declaration> {
+    pub fn lookup_type(&self, qname: &QualifiedName) -> Option<(&QualifiedName, &Term)> {
         self.decls
-            .values()
-            .find(|decl| decl.name().display() == Some(name))
-    }
-
-    pub fn lookup_type_by_name(&self, name: &str) -> Option<(&QualifiedName, &Term)> {
-        self.decls
-            .values()
-            .find(|decl| decl.name().display() == Some(name))
+            .get(qname)
             .map(|decl| (decl.name(), decl.type_()))
-            .or_else(|| {
-                self.externals
-                    .iter()
-                    .find(|(n, _)| n.display() == Some(name))
-                    .map(|(n, t)| (n, t))
-            })
+            .or_else(|| self.externals.get_key_value(qname).map(|(n, t)| (n, t)))
     }
 }
 
@@ -131,6 +161,8 @@ pub struct ElabState {
     pub gen_: UniqueGen,
     pub mctx: MetavarContext,
     pub lctx: LocalContext,
+    pub current_namespace: Vec<String>,
+    pub open_namespaces: Vec<Vec<String>>,
     pub errors: Vec<ElabError>,
 }
 
@@ -141,10 +173,13 @@ impl ElabState {
                 module_id: module.clone(),
                 externals: BTreeMap::new(),
                 decls: BTreeMap::new(),
+                root_namespace: Namespace::new(),
             },
             gen_: UniqueGen::new(module),
             mctx: MetavarContext::new(),
             lctx: LocalContext { decls: Vec::new() },
+            current_namespace: Vec::new(),
+            open_namespaces: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -167,6 +202,35 @@ impl ElabState {
 
     fn erroneous_term(&mut self) -> Term {
         Term::MVar(self.gen_.fresh_unnamed())
+    }
+
+    fn resolve_name(&self, namespace: &[String], member: &str) -> Option<(&QualifiedName, &Term)> {
+        let ns = &self.env.root_namespace;
+
+        if !namespace.is_empty() {
+            return ns
+                .resolve(namespace, member)
+                .and_then(|qn| self.env.lookup_type(qn));
+        }
+
+        if !self.current_namespace.is_empty() {
+            if let Some(qn) = ns.resolve(&self.current_namespace, member) {
+                if let Some(result) = self.env.lookup_type(qn) {
+                    return Some(result);
+                }
+            }
+        }
+
+        for opened in &self.open_namespaces {
+            if let Some(qn) = ns.resolve(opened, member) {
+                if let Some(result) = self.env.lookup_type(qn) {
+                    return Some(result);
+                }
+            }
+        }
+
+        ns.lookup_decl(member)
+            .and_then(|qn| self.env.lookup_type(qn))
     }
 
     pub fn elaborate_command(&mut self, cmd: &SyntaxExpr) {
@@ -230,12 +294,13 @@ impl ElabState {
         self.env.decls.insert(
             def_name.clone(),
             Declaration::Definition {
-                name: def_name,
+                name: def_name.clone(),
                 type_: pi_type,
                 value,
                 span,
             },
         );
+        self.register_in_namespace(name, def_name);
 
         self.lctx = saved_lctx;
     }
@@ -260,17 +325,21 @@ impl ElabState {
 
     fn elaborate_term_inner(&mut self, syntax: &SyntaxExpr) -> (Term, Term) {
         match syntax {
-            SyntaxExpr::Var { name, .. } => {
-                if let Some(decl) = self.lctx.lookup_name(name) {
-                    return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
+            SyntaxExpr::Var {
+                namespace, member, ..
+            } => {
+                if namespace.is_empty() {
+                    if let Some(decl) = self.lctx.lookup_name(member) {
+                        return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
+                    }
                 }
 
-                if let Some((name, type_)) = self.env.lookup_type_by_name(name) {
+                if let Some((name, type_)) = self.resolve_name(namespace, member) {
                     return (Term::Const(name.clone()), type_.clone());
                 }
 
                 self.errors.push(ElabError::new(
-                    ElabErrorKind::UndefinedVariable(name.clone()),
+                    ElabErrorKind::UndefinedVariable(member.clone()),
                     syntax.span(),
                 ));
                 (self.erroneous_term(), self.erroneous_term())
@@ -279,8 +348,10 @@ impl ElabState {
                 Term::Sort(Level::Zero),
                 Term::Sort(Level::Succ(Box::new(Level::Zero))),
             ),
-            SyntaxExpr::Constructor { name, .. } => {
-                if let Some((name, type_)) = self.env.lookup_type_by_name(name) {
+            SyntaxExpr::Constructor {
+                namespace, name, ..
+            } => {
+                if let Some((name, type_)) = self.resolve_name(namespace, name) {
                     return (Term::Const(name.clone()), type_.clone());
                 }
 
@@ -433,13 +504,30 @@ impl ElabState {
         self.env.decls.insert(
             record_name.clone(),
             Declaration::Constructor {
-                name: record_name,
+                name: record_name.clone(),
                 type_: pi_type,
                 span,
             },
         );
+        self.register_in_namespace(name, record_name);
 
         self.lctx = saved_lctx;
+    }
+
+    fn register_in_namespace(&mut self, display_name: &str, qname: QualifiedName) {
+        let ns = if self.current_namespace.is_empty() {
+            &mut self.env.root_namespace
+        } else {
+            let mut current = &mut self.env.root_namespace;
+            for segment in &self.current_namespace {
+                current = current
+                    .children
+                    .entry(segment.clone())
+                    .or_insert_with(Namespace::new);
+            }
+            current
+        };
+        ns.decls.insert(display_name.into(), qname);
     }
 }
 

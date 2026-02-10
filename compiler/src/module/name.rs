@@ -1,4 +1,4 @@
-use crate::module::{unique::Unique};
+use crate::module::unique::Unique;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QualifiedName {
@@ -33,7 +33,7 @@ impl IntrinsicName {
             IntrinsicName::Fin => "Fin",
             IntrinsicName::Array => "Array",
             IntrinsicName::ArrayNil => "Array.nil",
-            IntrinsicName::ArrayCons => "Array.cons"
+            IntrinsicName::ArrayCons => "Array.cons",
         }
     }
 }

@@ -19,6 +19,7 @@ pub enum TokenKind {
     Record,
     Comma,
     Colon,
+    DoubleColon,
     LBrace,
     RBrace,
     LParen,
