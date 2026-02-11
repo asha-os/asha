@@ -17,7 +17,7 @@ impl Unique {
             display_name,
         }
     }
-    
+
     pub fn unnamed(id: usize, module_id: ModuleId) -> Self {
         Self {
             id,
@@ -40,7 +40,7 @@ impl PartialOrd for Unique {
         Some(self.cmp(other))
     }
 }
-    
+
 impl Ord for Unique {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         match self.module_id.cmp(&other.module_id) {
@@ -58,10 +58,7 @@ pub struct UniqueGen {
 
 impl UniqueGen {
     pub fn new(module_id: ModuleId) -> Self {
-        Self {
-            module_id,
-            next: 0,
-        }
+        Self { module_id, next: 0 }
     }
 
     pub fn fresh(&mut self, name: String) -> Unique {
@@ -69,7 +66,7 @@ impl UniqueGen {
         self.next += 1;
         Unique::new(id as usize, self.module_id.clone(), Some(name))
     }
-    
+
     pub fn fresh_unnamed(&mut self) -> Unique {
         let id = self.next;
         self.next += 1;

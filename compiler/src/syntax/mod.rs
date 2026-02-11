@@ -87,5 +87,9 @@ fn spanning<A: Spanned, B: Spanned>(a: &A, b: &B) -> Span {
     if span_a.file != span_b.file {
         panic!("Cannot span across different files");
     }
-    Span::new(span_a.file, span_a.start.min(span_b.start), span_a.end.max(span_b.end))
+    Span::new(
+        span_a.file,
+        span_a.start.min(span_b.start),
+        span_a.end.max(span_b.end),
+    )
 }

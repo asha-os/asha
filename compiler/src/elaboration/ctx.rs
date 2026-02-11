@@ -1,6 +1,9 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, vec::Vec};
 
-use crate::{module::unique::{Unique, UniqueGen}, spine::Term};
+use crate::{
+    module::unique::{Unique, UniqueGen},
+    spine::Term,
+};
 
 #[derive(Debug, Clone)]
 pub struct LocalDecl {
@@ -29,7 +32,13 @@ impl LocalContext {
         fvar
     }
 
-    pub fn push_let(&mut self, name: String, type_: Term, value: Term, gen_: &mut UniqueGen) -> Unique {
+    pub fn push_let(
+        &mut self,
+        name: String,
+        type_: Term,
+        value: Term,
+        gen_: &mut UniqueGen,
+    ) -> Unique {
         let fvar = gen_.fresh(name);
         self.decls.push(LocalDecl {
             fvar: fvar.clone(),
@@ -37,14 +46,17 @@ impl LocalContext {
             value: Some(value),
         });
         fvar
-    }    
+    }
 
     pub fn lookup(&self, fvar: Unique) -> Option<&LocalDecl> {
         self.decls.iter().find(|d| d.fvar == fvar)
     }
-    
+
     pub fn lookup_name(&self, name: &str) -> Option<&LocalDecl> {
-        self.decls.iter().rev().find(|d| d.fvar.display_name.as_deref() == Some(name))
+        self.decls
+            .iter()
+            .rev()
+            .find(|d| d.fvar.display_name.as_deref() == Some(name))
     }
 }
 
@@ -80,7 +92,10 @@ impl MetavarContext {
     }
 
     pub fn assign(&mut self, mvar: Unique, value: Term) {
-        assert!(!self.assignments.contains_key(&mvar), "mvar already assigned");
+        assert!(
+            !self.assignments.contains_key(&mvar),
+            "mvar already assigned"
+        );
         self.assignments.insert(mvar, value);
     }
 

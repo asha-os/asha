@@ -4,11 +4,12 @@
 use alloc::string::{String, ToString};
 
 use crate::{
-    idt::{enable_interrupts, init_idt},
-    pic::init_pic,
+    ic::{init_interrupts, pop_scancode},
     serial::init_serial,
     tty::{
-        Tty, color::{Color, ColorCode}, writer::TextWriter
+        Tty,
+        color::{Color, ColorCode},
+        writer::TextWriter,
     },
 };
 
@@ -16,11 +17,16 @@ extern crate alloc;
 extern crate common;
 extern crate runtime;
 
+#[cfg(target_arch = "x86_64")]
+pub mod gdt;
 pub mod heap;
+pub mod ic;
+#[cfg(target_arch = "x86_64")]
 pub mod idt;
-pub mod pic;
 pub mod serial;
 pub mod tty;
+#[cfg(target_arch = "aarch64")]
+pub mod vectors;
 
 #[repr(C)]
 pub struct MemoryMapInfo {
@@ -59,97 +65,52 @@ impl FramebufferInfo {
 pub struct BootInfo {
     pub memory_map: MemoryMapInfo,
     pub framebuffer: FramebufferInfo,
-}
-
-#[repr(C, packed)]
-struct GdtEntry(u64);
-
-impl GdtEntry {
-    const fn null() -> Self {
-        GdtEntry(0)
-    }
-
-    const fn kernel_code() -> Self {
-        GdtEntry(0x00AF9A000000FFFF)
-    }
-
-    const fn kernel_data() -> Self {
-        GdtEntry(0x00CF92000000FFFF)
-    }
-}
-
-#[repr(C, packed)]
-struct GdtDescriptor {
-    limit: u16,
-    base: u64,
-}
-
-static GDT: [GdtEntry; 3] = [
-    GdtEntry::null(),
-    GdtEntry::kernel_code(),
-    GdtEntry::kernel_data(),
-];
-
-const KERNEL_CS: u16 = 0x08;
-const KERNEL_DS: u16 = 0x10;
-
-unsafe fn init_gdt() {
-    let descriptor = GdtDescriptor {
-        limit: (core::mem::size_of_val(&GDT) - 1) as u16,
-        base: GDT.as_ptr() as u64,
-    };
-
-    unsafe {
-        core::arch::asm!(
-            "lgdt [{}]",
-            "push {}",
-            "lea {tmp}, [rip + 2f]",
-            "push {tmp}",
-            "retfq",
-            "2:",
-            "mov ds, {ds:x}",
-            "mov es, {ds:x}",
-            "mov fs, {ds:x}",
-            "mov gs, {ds:x}",
-            "mov ss, {ds:x}",
-            in(reg) &descriptor,
-            in(reg) KERNEL_CS as u64,
-            ds = in(reg) KERNEL_DS as u64,
-            tmp = lateout(reg) _,
-        )
-    };
+    pub serial_base: u64,
+    pub gicd_base: u64,
+    pub gicc_base: u64,
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
-    unsafe {
-        init_gdt();
-        init_idt();
-    };
-    init_serial();
-    init_pic();
-    enable_interrupts();
-    pic::register_interrupt_handlers();
-    println!("Serial initialized.");
-
     let info = unsafe { &*boot_info };
+
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        gdt::init_gdt();
+        idt::init_idt();
+    }
+    #[cfg(target_arch = "aarch64")]
+    vectors::init_vectors(info.gicc_base as usize);
+
+    init_serial(info.serial_base as usize);
+    init_interrupts(info.gicd_base as usize, info.gicc_base as usize);
+
+    #[cfg(target_arch = "x86_64")]
+    idt::enable_interrupts();
+    #[cfg(target_arch = "aarch64")]
+    vectors::enable_interrupts();
+
+    println!("Serial initialized.");
+    println!(
+        "FB: base=0x{:x} size={} {}x{} stride={} fmt={}",
+        info.framebuffer.base,
+        info.framebuffer.size,
+        info.framebuffer.width,
+        info.framebuffer.height,
+        info.framebuffer.stride,
+        info.framebuffer.pixel_format,
+    );
     let (free_region, free_size) = find_free_region(&info.memory_map);
     heap::init_heap(free_region, free_size);
 
     let fb_buffer = unsafe {
         core::slice::from_raw_parts_mut(info.framebuffer.base as *mut u8, info.framebuffer.size)
     };
-    let text_writer = TextWriter::new_framebuffer_writer(
-        fb_buffer,
-        info.framebuffer.clone(),
-    );
-    let mut tty = Tty::new(
-        text_writer,
-        ColorCode::new(Color::White, Color::Black),
-    );
+    let text_writer = TextWriter::new_framebuffer_writer(fb_buffer, info.framebuffer.clone());
+    let mut tty = Tty::new(text_writer, ColorCode::new(Color::White, Color::Black));
     tty.set_shell_prompt("> ".to_string(), ColorCode::new(Color::Green, Color::Black));
     loop {
-        if let Some(scancode) = pic::pop_scancode() {
+        if let Some(scancode) = pop_scancode() {
             if let Some(command) = tty.handle_input(scancode) {
                 let command = String::from_utf8_lossy(&command);
                 println!("Command entered: {}", command);

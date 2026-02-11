@@ -6,7 +6,10 @@ use r_efi::protocols::file;
 use r_efi::protocols::graphics_output;
 use r_efi::protocols::simple_file_system;
 
+#[cfg(target_arch = "x86_64")]
 const KERNEL_LOAD_ADDR: u64 = 0x100000; // 1 MB
+#[cfg(target_arch = "aarch64")]
+const KERNEL_LOAD_ADDR: u64 = 0x4010_0000; // RAM base (0x4000_0000) + 1 MB offset
 
 #[repr(C)]
 pub struct MemoryMapInfo {
@@ -29,6 +32,9 @@ pub struct FramebufferInfo {
 pub struct BootInfo {
     pub memory_map: MemoryMapInfo,
     pub framebuffer: FramebufferInfo,
+    pub serial_base: u64,
+    pub gicd_base: u64,
+    pub gicc_base: u64,
 }
 
 #[unsafe(no_mangle)]
@@ -99,7 +105,7 @@ pub extern "efiapi" fn efi_main(
     let pages = (kernel_size + 0xFFF) / 0x1000;
     let mut addr = KERNEL_LOAD_ADDR;
     let status =
-        unsafe { (bs.allocate_pages)(efi::ALLOCATE_ADDRESS, efi::LOADER_DATA, pages, &mut addr) };
+        unsafe { (bs.allocate_pages)(efi::ALLOCATE_ADDRESS, efi::LOADER_CODE, pages, &mut addr) };
     if status != efi::Status::SUCCESS {
         print(con_out, "Failed to allocate memory for kernel\r\n");
         return status;
@@ -140,7 +146,7 @@ pub extern "efiapi" fn efi_main(
             pixel_format: mode_info.pixel_format,
         }
     } else {
-        print(con_out, "Warning: no GOP framebuffer\r\n");
+        print(con_out, "Warning: no GOP\r\n");
         FramebufferInfo {
             base: 0,
             size: 0,
@@ -213,6 +219,20 @@ pub extern "efiapi" fn efi_main(
             entry_size: desc_size,
         };
         (*boot_info).framebuffer = framebuffer;
+
+        // todo: actually extract these
+        #[cfg(target_arch = "x86_64")]
+        {
+            (*boot_info).serial_base = 0x3F8;
+            (*boot_info).gicd_base = 0;
+            (*boot_info).gicc_base = 0;
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            (*boot_info).serial_base = 0x0900_0000;
+            (*boot_info).gicd_base = 0x0800_0000;
+            (*boot_info).gicc_base = 0x0801_0000;
+        }
     }
 
     let status = unsafe { (bs.exit_boot_services)(image_handle, mmap_key) };
@@ -221,12 +241,17 @@ pub extern "efiapi" fn efi_main(
     }
 
     #[cfg(target_arch = "x86_64")]
-    let entry: extern "sysv64" fn(*const BootInfo) -> ! =
-        unsafe { core::mem::transmute(kernel_ptr) };
-    #[cfg(target_arch = "aarch64")] // todo: this is probably wrong
-    let entry: extern "C" fn(*const BootInfo) -> ! = unsafe { core::mem::transmute(kernel_ptr) };
-
-    entry(boot_info);
+    {
+        let entry: extern "sysv64" fn(*const BootInfo) -> ! =
+            unsafe { core::mem::transmute(kernel_ptr) };
+        entry(boot_info);
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        core::arch::asm!("dsb sy", "ic iallu", "dsb sy", "isb",);
+        let entry: extern "C" fn(*const BootInfo) -> ! = core::mem::transmute(kernel_ptr);
+        entry(boot_info);
+    }
 }
 
 fn print(con_out: &mut efi::protocols::simple_text_output::Protocol, s: &str) {

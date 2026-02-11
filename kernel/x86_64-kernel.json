@@ -13,6 +13,6 @@
   "disable-redzone": true,
   "features": "-mmx,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2",
   "pre-link-args": {
-    "ld.lld": ["-Tkernel/linker.ld"]
+    "ld.lld": ["-Tkernel/linker-x86_64.ld"]
   }
 }

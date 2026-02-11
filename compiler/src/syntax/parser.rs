@@ -182,14 +182,11 @@ fn inductive_constructors_parser<'a>(
 ) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
     just_token(TokenKind::LowerIdentifier)
         .then(
-            binder(expr.clone())
-                .repeated()
-                .collect::<Vec<_>>()
-                .then(
-                    just_token(TokenKind::Colon)
-                        .ignore_then(expr.clone())
-                        .or_not(),
-                )
+            binder(expr.clone()).repeated().collect::<Vec<_>>().then(
+                just_token(TokenKind::Colon)
+                    .ignore_then(expr.clone())
+                    .or_not(),
+            ),
         )
         .separated_by(just_token(TokenKind::Comma))
         .collect::<Vec<_>>()
@@ -466,15 +463,13 @@ fn expr_atom<'a>(
                 .collect::<Vec<_>>(),
         )
         .then(just_token(TokenKind::RParen))
-        .map(|((lparen, items), rparen)| {
-            match items.len() {
-                0 => Expr::Unit(spanning(&lparen, &rparen)),
-                1 => items.into_iter().next().unwrap(),
-                _ => Expr::Tuple {
-                    elements: items,
-                    span: spanning(&lparen, &rparen),
-                }
-            }
+        .map(|((lparen, items), rparen)| match items.len() {
+            0 => Expr::Unit(spanning(&lparen, &rparen)),
+            1 => items.into_iter().next().unwrap(),
+            _ => Expr::Tuple {
+                elements: items,
+                span: spanning(&lparen, &rparen),
+            },
         });
 
     let array = just_token(TokenKind::LBracket)

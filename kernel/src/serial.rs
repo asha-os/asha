@@ -1,6 +1,11 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 pub struct Serial;
 
-pub fn init_serial() {
+static SERIAL_BASE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(target_arch = "x86_64")]
+pub fn init_serial(_base: usize) {
     unsafe {
         core::arch::asm!(
             "mov dx, 0x3F8+1",
@@ -22,6 +27,12 @@ pub fn init_serial() {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn init_serial(base: usize) {
+    SERIAL_BASE.store(base, Ordering::Relaxed);
+}
+
+#[cfg(target_arch = "x86_64")]
 fn serial_write_byte(b: u8) {
     unsafe {
         core::arch::asm!(
@@ -36,6 +47,16 @@ fn serial_write_byte(b: u8) {
             out("al") _,
             out("dx") _,
         );
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn serial_write_byte(b: u8) {
+    let base = SERIAL_BASE.load(Ordering::Relaxed);
+    let uartdr = base;
+
+    unsafe {
+        core::ptr::write_volatile(uartdr as *mut u32, b as u32);
     }
 }
 

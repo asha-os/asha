@@ -1,8 +1,14 @@
 use core::fmt::Display;
 
-use alloc::{format, string::{String, ToString}};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 
-use crate::{elaboration::{Declaration, Environment}, spine::{BinderInfo, Term}};
+use crate::{
+    elaboration::{Declaration, Environment},
+    spine::{BinderInfo, Term},
+};
 
 impl Display for Environment {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -10,15 +16,23 @@ impl Display for Environment {
             writeln!(f, "{}", decl)?;
         }
         Ok(())
-    }    
+    }
 }
 
 impl Display for Declaration {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Declaration::Definition { name, type_, value, .. } => {
-                write!(f, "def {} : {} := {}", name.display().unwrap(), type_, value)
-            },
+            Declaration::Definition {
+                name, type_, value, ..
+            } => {
+                write!(
+                    f,
+                    "def {} : {} := {}",
+                    name.display().unwrap(),
+                    type_,
+                    value
+                )
+            }
             Declaration::Constructor { name, type_, .. } => {
                 write!(f, "constructor {} : {}", name.display().unwrap(), type_)
             }
@@ -46,13 +60,18 @@ pub fn pretty_term(term: &Term) -> String {
         Term::Lam(binder_info, param, body) => {
             let binder_str = binder_surrounding(binder_info, pretty_term(param));
             format!("λ {}. {}", binder_str, pretty_term(body))
-        },
+        }
         Term::Sigma(binder_info, param, body) => {
             let binder_str = binder_surrounding(binder_info, pretty_term(param));
             format!("Σ {} × {}", binder_str, pretty_term(body))
-        },
+        }
         Term::Sort(level) => format!("Type({:?})", level),
-        Term::Let(binding, value, body) => format!("(let {} = {} in {})", pretty_term(binding), pretty_term(value), pretty_term(body)),
+        Term::Let(binding, value, body) => format!(
+            "(let {} = {} in {})",
+            pretty_term(binding),
+            pretty_term(value),
+            pretty_term(body)
+        ),
         Term::Lit(lit) => format!("{:?}", lit),
         Term::Unit => "Unit".to_string(),
     }

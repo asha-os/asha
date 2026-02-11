@@ -19,12 +19,7 @@ runtime = { path = "runtime" }
 thiserror = { version = "2", default-features = false }
 anyhow = { version = "1", default-features = false }
 chumsky = { version = "0.12", default-features = false }
-miette = {
-    git = "https://github.com/huitseeker/miette",
-    branch = "no-std",
-    default-features = false,
-    features=["fancy-base"]
-}
+miette = { git = "https://github.com/huitseeker/miette", branch = "no-std", default-features = false, features=["fancy-base"] }
 spin = "0.10"
 talc = "4.4"
 lazy_static = { version = "1.5", default-features = false, features = ["spin_no_std"] }

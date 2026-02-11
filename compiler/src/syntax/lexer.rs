@@ -220,7 +220,8 @@ impl<'a> Iterator for Lexer<'a> {
             }
             ':' => {
                 self.cursor.advance(1);
-                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b':' {
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b':'
+                {
                     self.cursor.advance(1);
                     Some(Ok(Token {
                         kind: TokenKind::DoubleColon,

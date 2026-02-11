@@ -12,7 +12,7 @@ impl ColorCode {
         let bg = (self.0 & 0xF0) >> 4;
         ColorCode((fg << 4) | bg)
     }
-    
+
     pub fn foreground(&self) -> Color {
         Color::from_u8(self.0 & 0x0F)
     }

@@ -15,7 +15,7 @@ pub enum Term {
     Sigma(BinderInfo, Box<Term>, Box<Term>),
     Let(Box<Term>, Box<Term>, Box<Term>),
     Lit(Literal),
-    Unit
+    Unit,
 }
 
 impl Term {

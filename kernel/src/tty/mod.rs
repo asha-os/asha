@@ -1,10 +1,8 @@
 use alloc::{string::String, vec::Vec};
 
-use crate::{
-    tty::{
-        color::{Color, ColorCode},
-        keyboard::{Key, KeyEvent, KeyboardState},
-    },
+use crate::tty::{
+    color::{Color, ColorCode},
+    keyboard::{Key, KeyEvent, KeyboardState},
 };
 
 pub mod color;
@@ -55,7 +53,7 @@ impl Tty {
                 let action = self.interpret_key(u);
                 self.perform_action(action)
             }
-            KeyEvent::Released(_) => None
+            KeyEvent::Released(_) => None,
         }
     }
 
@@ -115,7 +113,7 @@ impl Tty {
                 self.clear_from_col(0, self.cursor.1);
                 let current_prompt = core::mem::take(&mut self.current_prompt);
                 self.set_cursor(0, self.cursor.1);
-                return Some(current_prompt)
+                return Some(current_prompt);
             }
             _ => {}
         }

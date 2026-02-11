@@ -1,5 +1,3 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use crate::{define_interrupt_handler, idt::set_handler};
 
 pub fn init_pic() {
@@ -38,30 +36,9 @@ pub fn register_interrupt_handlers() {
 
 define_interrupt_handler!(keyboard_isr, keyboard_handler);
 
-static mut KEY_BUFFER: [u8; 256] = [0; 256];
-static WRITE_POS: AtomicUsize = AtomicUsize::new(0);
-static READ_POS: AtomicUsize = AtomicUsize::new(0);
-
-pub fn push_scancode(scancode: u8) {
-    let w = WRITE_POS.load(Ordering::Relaxed);
-    unsafe { KEY_BUFFER[w & 0xFF] = scancode };
-    WRITE_POS.store(w.wrapping_add(1), Ordering::Release);
-}
-
-pub fn pop_scancode() -> Option<u8> {
-    let r = READ_POS.load(Ordering::Relaxed);
-    let w = WRITE_POS.load(Ordering::Acquire);
-    if r == w {
-        return None;
-    }
-    let code = unsafe { KEY_BUFFER[r & 0xFF] };
-    READ_POS.store(r.wrapping_add(1), Ordering::Relaxed);
-    Some(code)
-}
-
 extern "C" fn keyboard_handler() {
     let scancode: u8;
     unsafe { core::arch::asm!("in al, 0x60", out("al") scancode) };
     unsafe { core::arch::asm!("mov al, 0x20", "out 0x20, al") };
-    push_scancode(scancode);
+    super::push_scancode(scancode);
 }

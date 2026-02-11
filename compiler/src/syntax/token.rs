@@ -50,5 +50,5 @@ pub struct TokenStream<'a> {
 impl Spanned for Token<'_> {
     fn span(&self) -> Span {
         self.span
-    }    
+    }
 }

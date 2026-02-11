@@ -117,7 +117,7 @@ pub enum SyntaxExpr {
         binders: Vec<SyntaxBinder>,
         type_ann: Option<Box<SyntaxExpr>>,
         span: Span,
-    }
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
