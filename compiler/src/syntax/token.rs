@@ -39,6 +39,16 @@ pub enum TokenKind {
     FatArrow,
     Dot,
     Underscore,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    EqualEqual,
+    BangEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,5 +60,5 @@ pub struct TokenStream<'a> {
 impl Spanned for Token<'_> {
     fn span(&self) -> Span {
         self.span
-    }    
+    }
 }

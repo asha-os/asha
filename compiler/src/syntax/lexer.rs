@@ -153,6 +153,15 @@ impl<'a> Iterator for Lexer<'a> {
                         lexeme: &source[start..self.cursor.byte_offset],
                         span: self.cursor.span_from(start),
                     }))
+                } else if self.cursor.byte_offset < source.len()
+                    && source[self.cursor.byte_offset] == b'='
+                {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::EqualEqual,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
                 } else {
                     Some(Ok(Token {
                         kind: TokenKind::Equal,
@@ -220,7 +229,8 @@ impl<'a> Iterator for Lexer<'a> {
             }
             ':' => {
                 self.cursor.advance(1);
-                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b':' {
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b':'
+                {
                     self.cursor.advance(1);
                     Some(Ok(Token {
                         kind: TokenKind::DoubleColon,
@@ -302,8 +312,9 @@ impl<'a> Iterator for Lexer<'a> {
                         span: self.cursor.span_from(start),
                     }))
                 } else {
-                    Some(Err(LexError {
-                        kind: LexErrorKind::UnexpectedChar('-'),
+                    Some(Ok(Token {
+                        kind: TokenKind::Minus,
+                        lexeme: &source[start..self.cursor.byte_offset],
                         span: self.cursor.span_from(start),
                     }))
                 }
@@ -326,9 +337,19 @@ impl<'a> Iterator for Lexer<'a> {
                         lexeme: &source[start..self.cursor.byte_offset],
                         span: self.cursor.span_from(start),
                     }))
+                } else if self.cursor.byte_offset < source.len()
+                    && source[self.cursor.byte_offset] == b'='
+                {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::GreaterEqual,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
                 } else {
-                    Some(Err(LexError {
-                        kind: LexErrorKind::UnexpectedChar('>'),
+                    Some(Ok(Token {
+                        kind: TokenKind::Greater,
+                        lexeme: &source[start..self.cursor.byte_offset],
                         span: self.cursor.span_from(start),
                     }))
                 }
@@ -340,6 +361,65 @@ impl<'a> Iterator for Lexer<'a> {
                     lexeme: &source[start..self.cursor.byte_offset],
                     span: self.cursor.span_from(start),
                 }))
+            }
+            '+' => {
+                self.cursor.advance(1);
+                Some(Ok(Token {
+                    kind: TokenKind::Plus,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
+            '*' => {
+                self.cursor.advance(1);
+                Some(Ok(Token {
+                    kind: TokenKind::Star,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
+            '/' => {
+                self.cursor.advance(1);
+                Some(Ok(Token {
+                    kind: TokenKind::Slash,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
+            '!' => {
+                self.cursor.advance(1);
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b'='
+                {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::BangEqual,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                } else {
+                    Some(Err(LexError {
+                        kind: LexErrorKind::UnexpectedChar('!'),
+                        span: self.cursor.span_from(start),
+                    }))
+                }
+            }
+            '<' => {
+                self.cursor.advance(1);
+                if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b'='
+                {
+                    self.cursor.advance(1);
+                    Some(Ok(Token {
+                        kind: TokenKind::LessEqual,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                } else {
+                    Some(Ok(Token {
+                        kind: TokenKind::Less,
+                        lexeme: &source[start..self.cursor.byte_offset],
+                        span: self.cursor.span_from(start),
+                    }))
+                }
             }
             u => {
                 self.cursor.advance_char(u);

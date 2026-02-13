@@ -146,6 +146,16 @@ impl fmt::Display for TokenKind {
             TokenKind::FatArrow => write!(f, "`=>`"),
             TokenKind::Dot => write!(f, "`.`"),
             TokenKind::Underscore => write!(f, "`_`"),
+            TokenKind::Plus => write!(f, "`+`"),
+            TokenKind::Minus => write!(f, "`-`"),
+            TokenKind::Star => write!(f, "`*`"),
+            TokenKind::Slash => write!(f, "`/`"),
+            TokenKind::EqualEqual => write!(f, "`==`"),
+            TokenKind::BangEqual => write!(f, "`!=`"),
+            TokenKind::Less => write!(f, "`<`"),
+            TokenKind::Greater => write!(f, "`>`"),
+            TokenKind::LessEqual => write!(f, "`<=`"),
+            TokenKind::GreaterEqual => write!(f, "`>=`"),
         }
     }
 }

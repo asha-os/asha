@@ -20,15 +20,13 @@ use crate::{
     module::{
         ModuleId,
         name::QualifiedName,
-        prim::{
-            PRIM_ARRAY, PRIM_ARRAY_CONS, PRIM_ARRAY_NIL, PRIM_FIN, PRIM_IO, PRIM_NAT, PRIM_STRING,
-        },
+        prim::*,
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term},
     syntax::{
         Span, Spanned,
-        tree::{SyntaxBinder, SyntaxExpr},
+        tree::{InfixOp, SyntaxBinder, SyntaxExpr},
     },
 };
 
@@ -109,12 +107,29 @@ impl Environment {
                 Box::new(Term::Sort(Level::Zero)),
             ),
         );
+        externals.insert(
+            PRIM_ADD,
+            Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(Term::Const(PRIM_NAT)),
+                Box::new(Term::Pi(
+                    BinderInfo::Explicit,
+                    Box::new(Term::Const(PRIM_NAT)),
+                    Box::new(Term::Const(PRIM_NAT)),
+                )),
+            ),
+        );
         let mut root_namespace = Namespace::new();
         root_namespace.decls.insert("Nat".into(), PRIM_NAT);
         root_namespace.decls.insert("Str".into(), PRIM_STRING);
         root_namespace.decls.insert("Fin".into(), PRIM_FIN);
         root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
         root_namespace.decls.insert("IO".into(), PRIM_IO);
+        root_namespace.decls.insert("HAdd".into(), PRIM_HADD);
+        root_namespace.children.insert("HAdd".into(), Namespace {
+            decls: [("add".into(), PRIM_ADD)].into(),
+            children: BTreeMap::new(),
+        });
         Self {
             module_id,
             externals,
@@ -439,39 +454,68 @@ impl ElabState {
                 }
                 (result, array_type)
             }
-            SyntaxExpr::App { fun, arg, .. } => {
-                let (mut term, mut fn_type) = self.elaborate_term_inner(fun);
+            SyntaxExpr::InfixOp { op, lhs, rhs, span } => {
+                let (op_namespace, op_name) = match op {
+                    InfixOp::Add => (PRIM_HADD, PRIM_ADD),
+                    InfixOp::Sub => (PRIM_HSUB, PRIM_SUB),
+                    InfixOp::Mul => (PRIM_HMUL, PRIM_MUL),
+                    InfixOp::Div => (PRIM_HDIV, PRIM_DIV),
+                    InfixOp::Eq => (PRIM_BEQ, PRIM_EQ),
+                    InfixOp::Neq => (PRIM_BNEQ, PRIM_NEQ),
+                    InfixOp::Lt => (PRIM_HLT, PRIM_LT),
+                    InfixOp::Leq => (PRIM_HLEQ, PRIM_LEQ),
+                    InfixOp::Gt => (PRIM_HGT, PRIM_GEQ),
+                    InfixOp::Geq => (PRIM_HGEQ, PRIM_GEQ),
+                };
+                let namespace = alloc::vec![op_namespace.display().unwrap().to_string()];
+                let member = op_name.display().unwrap().to_string();
+                let term = self.elaborate_term(&SyntaxExpr::Var {
+                    namespace: namespace.clone(),
+                    member: member.clone(),
+                    span: *span,
+                }, None);
+                let (arg1, arg2_ty) = self.elaborate_term_inner(lhs);
+                let arg2 = self.elaborate_term(rhs, Some(&arg2_ty));
 
-                loop {
-                    fn_type = reduce::whnf(self, &fn_type);
-                    match &fn_type {
-                        Term::Pi(info, param_ty, body_ty) if info != &BinderInfo::Explicit => {
-                            let mvar = self.fresh_mvar(*param_ty.clone());
-                            fn_type = subst::instantiate(body_ty, &mvar);
-                            term = Term::App(Box::new(term), Box::new(mvar));
+                if let Some((_, expected_fn_type)) =
+                    self.resolve_name(&namespace, &member)
+                {
+                    let return_type = match expected_fn_type {
+                        Term::Pi(_, _, body) => {
+                            let after_arg1 = subst::instantiate(body, &arg1);
+                            match after_arg1 {
+                                Term::Pi(_, _, body2) => {
+                                    subst::instantiate(&body2, &arg2)
+                                }
+                                _ => {
+                                    self.errors.push(ElabError::new(
+                                        ElabErrorKind::NotAFunction(after_arg1),
+                                        *span,
+                                    ));
+                                    self.erroneous_term()
+                                }
+                            }
                         }
-                        _ => break,
+                        _ => {
+                            self.errors.push(ElabError::new(
+                                ElabErrorKind::NotAFunction(expected_fn_type.clone()),
+                                *span,
+                            ));
+                            self.erroneous_term()
+                        }
                     };
-                }
-
-                match fn_type {
-                    Term::Pi(_info, param_ty, body_ty) => {
-                        let elaborated_arg = self.elaborate_term(arg, Some(&param_ty));
-                        let return_type = subst::instantiate(&body_ty, &elaborated_arg);
-                        (
-                            Term::App(Box::new(term), Box::new(elaborated_arg)),
-                            return_type,
-                        )
-                    }
-                    u => {
-                        self.errors.push(ElabError::new(
-                            ElabErrorKind::NotAFunction(u),
-                            syntax.span(),
-                        ));
-                        return (self.erroneous_term(), self.erroneous_term());
-                    }
+                    (term, return_type)
+                } else {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::UndefinedVariable(
+                            op_namespace.display().unwrap().to_string(),
+                        ),
+                        *span,
+                    ));
+                    return (self.erroneous_term(), self.erroneous_term());
                 }
             }
+            SyntaxExpr::App { fun, arg, .. } => self.elaborate_app(syntax, fun, arg),
             SyntaxExpr::Arrow {
                 param_type,
                 return_type,
@@ -495,6 +539,45 @@ impl ElabState {
                     syntax.span(),
                 ));
                 (self.erroneous_term(), self.erroneous_term())
+            }
+        }
+    }
+
+    fn elaborate_app(
+        &mut self,
+        syntax: &SyntaxExpr,
+        fun: &SyntaxExpr,
+        arg: &SyntaxExpr,
+    ) -> (Term, Term) {
+        let (mut term, mut fn_type) = self.elaborate_term_inner(fun);
+
+        loop {
+            fn_type = reduce::whnf(self, &fn_type);
+            match &fn_type {
+                Term::Pi(info, param_ty, body_ty) if info != &BinderInfo::Explicit => {
+                    let mvar = self.fresh_mvar(*param_ty.clone());
+                    fn_type = subst::instantiate(body_ty, &mvar);
+                    term = Term::App(Box::new(term), Box::new(mvar));
+                }
+                _ => break,
+            };
+        }
+
+        match fn_type {
+            Term::Pi(_info, param_ty, body_ty) => {
+                let elaborated_arg = self.elaborate_term(arg, Some(&param_ty));
+                let return_type = subst::instantiate(&body_ty, &elaborated_arg);
+                (
+                    Term::App(Box::new(term), Box::new(elaborated_arg)),
+                    return_type,
+                )
+            }
+            u => {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::NotAFunction(u),
+                    syntax.span(),
+                ));
+                return (self.erroneous_term(), self.erroneous_term());
             }
         }
     }

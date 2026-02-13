@@ -12,7 +12,7 @@ use crate::{
         error::{ParseError, ParseErrorKind},
         spanning,
         token::{Token, TokenKind},
-        tree::{SyntaxBinder, SyntaxExpr as Expr},
+        tree::{InfixOp, SyntaxBinder, SyntaxExpr as Expr},
     },
 };
 
@@ -182,14 +182,11 @@ fn inductive_constructors_parser<'a>(
 ) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
     just_token(TokenKind::LowerIdentifier)
         .then(
-            binder(expr.clone())
-                .repeated()
-                .collect::<Vec<_>>()
-                .then(
-                    just_token(TokenKind::Colon)
-                        .ignore_then(expr.clone())
-                        .or_not(),
-                )
+            binder(expr.clone()).repeated().collect::<Vec<_>>().then(
+                just_token(TokenKind::Colon)
+                    .ignore_then(expr.clone())
+                    .or_not(),
+            ),
         )
         .separated_by(just_token(TokenKind::Comma))
         .collect::<Vec<_>>()
@@ -301,7 +298,61 @@ fn expr_impl<'a>(
         },
     );
 
-    let arrow_or_product = proj
+    let mul = proj.clone().foldl(
+        choice((
+            just_token(TokenKind::Star).to(InfixOp::Mul),
+            just_token(TokenKind::Slash).to(InfixOp::Div),
+        ))
+        .then(proj.clone())
+        .repeated(),
+        |lhs, (op, rhs)| Expr::InfixOp {
+            span: spanning(&lhs, &rhs),
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+    );
+
+    let add = mul.clone().foldl(
+        choice((
+            just_token(TokenKind::Plus).to(InfixOp::Add),
+            just_token(TokenKind::Minus).to(InfixOp::Sub),
+        ))
+        .then(mul.clone())
+        .repeated(),
+        |lhs, (op, rhs)| Expr::InfixOp {
+            span: spanning(&lhs, &rhs),
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+    );
+
+    let cmp = add
+        .clone()
+        .then(
+            choice((
+                just_token(TokenKind::EqualEqual).to(InfixOp::Eq),
+                just_token(TokenKind::BangEqual).to(InfixOp::Neq),
+                just_token(TokenKind::LessEqual).to(InfixOp::Leq),
+                just_token(TokenKind::GreaterEqual).to(InfixOp::Geq),
+                just_token(TokenKind::Less).to(InfixOp::Lt),
+                just_token(TokenKind::Greater).to(InfixOp::Gt),
+            ))
+            .then(add.clone())
+            .or_not(),
+        )
+        .map(|(lhs, rest)| match rest {
+            None => lhs,
+            Some((op, rhs)) => Expr::InfixOp {
+                span: spanning(&lhs, &rhs),
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        });
+
+    let arrow_or_product = cmp
         .clone()
         .then(
             choice((
@@ -466,15 +517,13 @@ fn expr_atom<'a>(
                 .collect::<Vec<_>>(),
         )
         .then(just_token(TokenKind::RParen))
-        .map(|((lparen, items), rparen)| {
-            match items.len() {
-                0 => Expr::Unit(spanning(&lparen, &rparen)),
-                1 => items.into_iter().next().unwrap(),
-                _ => Expr::Tuple {
-                    elements: items,
-                    span: spanning(&lparen, &rparen),
-                }
-            }
+        .map(|((lparen, items), rparen)| match items.len() {
+            0 => Expr::Unit(spanning(&lparen, &rparen)),
+            1 => items.into_iter().next().unwrap(),
+            _ => Expr::Tuple {
+                elements: items,
+                span: spanning(&lparen, &rparen),
+            },
         });
 
     let array = just_token(TokenKind::LBracket)

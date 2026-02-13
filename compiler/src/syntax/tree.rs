@@ -6,6 +6,20 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfixOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Leq,
+    Geq,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyntaxExpr {
     Root(Vec<SyntaxExpr>),
@@ -117,7 +131,13 @@ pub enum SyntaxExpr {
         binders: Vec<SyntaxBinder>,
         type_ann: Option<Box<SyntaxExpr>>,
         span: Span,
-    }
+    },
+    InfixOp {
+        op: InfixOp,
+        lhs: Box<SyntaxExpr>,
+        rhs: Box<SyntaxExpr>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +178,7 @@ impl Spanned for SyntaxExpr {
             SyntaxExpr::Unit(span) => *span,
             SyntaxExpr::Inductive { span, .. } => *span,
             SyntaxExpr::InductiveConstructor { span, .. } => *span,
+            SyntaxExpr::InfixOp { span, .. } => *span,
         }
     }
 }
