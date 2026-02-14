@@ -26,3 +26,6 @@ lazy_static = { version = "1.5", default-features = false, features = ["spin_no_
 
 [patch.crates-io]
 textwrap = { git = "https://github.com/asha-os/textwrap" }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(target_os, values("asha"))'] }

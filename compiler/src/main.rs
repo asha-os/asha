@@ -3,6 +3,7 @@
 
 use alloc::string::{String, ToString};
 use api::{
+    exit,
     io::{fs::MappedFile, stdin::Args},
     println,
 };
@@ -24,20 +25,20 @@ pub mod spine;
 pub mod syntax;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> i32 {
+pub extern "C" fn _start() -> ! {
     let args = Args::get();
     if args.is_none() {
         println!("You must provide a source file as an argument.");
-        return 1;
+        exit(1);
     }
     let mut args = args.unwrap();
     if args.len() < 2 {
         println!("You must provide a source file as an argument.");
-        return 1;
+        exit(1);
     }
 
     let _program_name = args.next();
-    let source_file = String::from_utf16_lossy(args.next().unwrap().as_utf16());
+    let source_file = args.next().unwrap();
     println!("Opening file: {}", &source_file);
 
     if let Some(file) = MappedFile::open(&source_file) {
@@ -114,9 +115,9 @@ pub extern "C" fn _start() -> i32 {
             None => {}
         }
 
-        return 0;
+        exit(0);
     } else {
         println!("File not found!");
-        return 1;
+        exit(1);
     }
 }

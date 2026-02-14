@@ -9,3 +9,6 @@ common.workspace = true
 api.workspace = true
 spin.workspace = true
 talc.workspace = true
+
+[lints]
+workspace = true

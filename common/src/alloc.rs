@@ -30,8 +30,6 @@ mod windows {
     type HANDLE = *mut c_void;
     type DWORD = u32;
 
-    const HEAP_ZERO_MEMORY: DWORD = 0x00000008;
-
     unsafe extern "system" {
         fn GetProcessHeap() -> HANDLE;
         fn HeapAlloc(hHeap: HANDLE, dwFlags: DWORD, dwBytes: usize) -> *mut c_void;
