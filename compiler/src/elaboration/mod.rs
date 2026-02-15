@@ -127,25 +127,25 @@ impl Environment {
     pub fn pre_loaded(module_id: ModuleId) -> Self {
         // todo: review
         let mut externals = BTreeMap::new();
-        externals.insert(PRIM_NAT, Term::Sort(Level::Zero));
-        externals.insert(PRIM_STRING, Term::Sort(Level::Zero));
+        externals.insert(PRIM_NAT, Term::Sort(Level::type0()));
+        externals.insert(PRIM_STRING, Term::Sort(Level::type0()));
         externals.insert(
             PRIM_FIN,
             Term::Pi(
                 BinderInfo::Explicit,
                 Box::new(Term::Const(PRIM_NAT)),
-                Box::new(Term::Sort(Level::Zero)),
+                Box::new(Term::Sort(Level::type0())),
             ),
         );
         externals.insert(
             PRIM_ARRAY,
             Term::Pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Sort(Level::Zero)),
+                Box::new(Term::Sort(Level::type0())),
                 Box::new(Term::Pi(
                     BinderInfo::Explicit,
                     Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::Sort(Level::Zero)),
+                    Box::new(Term::Sort(Level::type0())),
                 )),
             ),
         );
@@ -153,13 +153,13 @@ impl Environment {
             PRIM_IO,
             Term::Pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Sort(Level::Zero)),
-                Box::new(Term::Sort(Level::Zero)),
+                Box::new(Term::Sort(Level::type0())),
+                Box::new(Term::Sort(Level::type0())),
             ),
         );
         // todo: remove these
         externals.insert(
-            PRIM_ADD,
+            PRIM_ADD_FN,
             Term::Pi(
                 BinderInfo::Explicit,
                 Box::new(Term::Const(PRIM_NAT)),
@@ -171,14 +171,14 @@ impl Environment {
             ),
         );
         externals.insert(
-            PRIM_GT,
+            PRIM_GT_FN,
             Term::Pi(
                 BinderInfo::Explicit,
                 Box::new(Term::Const(PRIM_NAT)),
                 Box::new(Term::Pi(
                     BinderInfo::Explicit,
                     Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::Const(PRIM_BOOL)),
+                    Box::new(Term::Sort(Level::Zero)),
                 )),
             ),
         );
@@ -189,16 +189,16 @@ impl Environment {
         root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
         root_namespace.decls.insert("IO".into(), PRIM_IO);
         root_namespace.children.insert(
-            "HAdd".into(),
+            "Add".into(),
             Namespace {
-                decls: [("add".into(), PRIM_ADD)].into(),
+                decls: [("add".into(), PRIM_ADD_FN)].into(),
                 children: BTreeMap::new(),
             },
         );
         root_namespace.children.insert(
-            "HGt".into(),
+            "Gt".into(),
             Namespace {
-                decls: [("gt".into(), PRIM_GT)].into(),
+                decls: [("gt".into(), PRIM_GT_FN)].into(),
                 children: BTreeMap::new(),
             },
         );
@@ -535,6 +535,10 @@ impl ElabState {
                 Term::Sort(Level::Zero),
                 Term::Sort(Level::Succ(Box::new(Level::Zero))),
             ),
+            SyntaxExpr::Constructor { name, .. } if name == "Prop" => (
+                Term::Sort(Level::Zero),
+                Term::Sort(Level::Succ(Box::new(Level::Zero))),
+            ),
             SyntaxExpr::Constructor {
                 namespace, name, ..
             } => {
@@ -598,16 +602,16 @@ impl ElabState {
             }
             SyntaxExpr::InfixOp { op, lhs, rhs, span } => {
                 let (op_namespace, op_name) = match op {
-                    InfixOp::Add => (PRIM_HADD, PRIM_ADD),
-                    InfixOp::Sub => (PRIM_HSUB, PRIM_SUB),
-                    InfixOp::Mul => (PRIM_HMUL, PRIM_MUL),
-                    InfixOp::Div => (PRIM_HDIV, PRIM_DIV),
-                    InfixOp::Eq => (PRIM_BEQ, PRIM_EQ),
-                    InfixOp::Neq => (PRIM_BNEQ, PRIM_NEQ),
-                    InfixOp::Lt => (PRIM_HLT, PRIM_LT),
-                    InfixOp::Leq => (PRIM_HLEQ, PRIM_LEQ),
-                    InfixOp::Gt => (PRIM_HGT, PRIM_GT),
-                    InfixOp::Geq => (PRIM_HGEQ, PRIM_GEQ),
+                    InfixOp::Add => (PRIM_ADD_CLASS, PRIM_ADD_FN),
+                    InfixOp::Sub => (PRIM_SUB_CLASS, PRIM_SUB_FN),
+                    InfixOp::Mul => (PRIM_MUL_CLASS, PRIM_MUL_FN),
+                    InfixOp::Div => (PRIM_DIV_CLASS, PRIM_DIV_FN),
+                    InfixOp::Eq => (PRIM_BEQ_CLASS, PRIM_BEQ_FN),
+                    InfixOp::Neq => (PRIM_BNEQ_CLASS, PRIM_BNEQ_FN),
+                    InfixOp::Lt => (PRIM_LT_CLASS, PRIM_LT_FN),
+                    InfixOp::Gt => (PRIM_GT_CLASS, PRIM_GT_FN),
+                    InfixOp::Leq => (PRIM_LEQ_CLASS, PRIM_LEQ_FN),
+                    InfixOp::Geq => (PRIM_GEQ_CLASS, PRIM_GEQ_FN),
                 };
                 let namespace_str = op_namespace.display().unwrap();
                 let namespace = alloc::vec![namespace_str.to_string()];

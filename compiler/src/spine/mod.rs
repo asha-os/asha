@@ -50,3 +50,9 @@ pub enum Level {
     IMax(Box<Level>, Box<Level>),
     MVar(Unique),
 }
+
+impl Level {
+    pub fn type0() -> Self {
+        Level::Succ(Box::new(Level::Zero))
+    }
+}
