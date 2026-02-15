@@ -543,12 +543,12 @@ impl ElabState {
                 (self.erroneous_term(), self.erroneous_term())
             }
             SyntaxExpr::Constructor { name, .. } if name == "Type" => (
-                Term::Sort(Level::Zero),
-                Term::Sort(Level::Succ(Box::new(Level::Zero))),
+                Term::Sort(Level::type0()),
+                Term::Sort(Level::Succ(Box::new(Level::type0())))
             ),
             SyntaxExpr::Constructor { name, .. } if name == "Prop" => (
                 Term::Sort(Level::Zero),
-                Term::Sort(Level::Succ(Box::new(Level::Zero))),
+                Term::Sort(Level::type0()),
             ),
             SyntaxExpr::Constructor {
                 namespace, name, ..
@@ -577,7 +577,7 @@ impl ElabState {
                     let (_term, head_ty) = self.elaborate_term_inner(head);
                     head_ty
                 } else {
-                    self.fresh_mvar(Term::Sort(Level::Zero))
+                    self.fresh_mvar(Term::Sort(Level::type0()))
                 };
                 let elems_len = elems.len() as u64;
 
@@ -734,7 +734,7 @@ impl ElabState {
                         Box::new(elaborated_param_type.clone()),
                         Box::new(elaborated_return_type.clone()),
                     ),
-                    Term::Sort(Level::Zero),
+                    Term::Sort(Level::type0()),
                 )
             }
             SyntaxExpr::Lambda { binders, body, .. } => {
@@ -753,7 +753,7 @@ impl ElabState {
                 self.lctx = saved_lctx;
                 (term, result_type)
             }
-            SyntaxExpr::Unit { .. } => (Term::Unit, Term::Sort(Level::Zero)),
+            SyntaxExpr::Unit { .. } => (Term::Unit, Term::Sort(Level::type0())),
             u => {
                 self.errors.push(ElabError::new(
                     err::ElabErrorKind::UnsupportedSyntax(u.clone()),
@@ -850,7 +850,7 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
         let mut constructor_type = Term::Const(record_name.clone());
-        for field in fields {
+        for field in fields.iter().rev() {
             let field_name = QualifiedName::User(self.gen_.fresh(field.name.clone()));
             let field_type = self.elaborate_term(&field.type_ann, None);
             // todo: make this a def
@@ -870,7 +870,7 @@ impl ElabState {
             );
         }
 
-        let pi_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::Zero));
+        let pi_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
         let constructor_type = Self::abstract_binders(&binder_fvars, constructor_type);
 
         self.env.decls.insert(
@@ -946,7 +946,7 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
 
         let binder_fvars = self.elaborate_binders(binders);
-        let inductive_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::Zero));
+        let inductive_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
         self.env.decls.insert(
             name.clone(),
             Declaration::Constructor {
@@ -1065,7 +1065,7 @@ impl ElabState {
             child_ns.decls.insert(field_display_name, field_name);
         }
 
-        let class_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::Zero));
+        let class_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
         self.register_in_namespace(&name_str, name.clone());
 
         self.env.decls.insert(

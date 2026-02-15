@@ -55,4 +55,12 @@ impl Level {
     pub fn type0() -> Self {
         Level::Succ(Box::new(Level::Zero))
     }
+
+    pub fn type_n(n: u64) -> Self {
+        let mut level = Level::Zero;
+        for _ in 0..n {
+            level = Level::Succ(Box::new(level));
+        }
+        level
+    }
 }
