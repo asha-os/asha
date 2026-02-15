@@ -10,4 +10,4 @@ inductive ScottNat {
 instance scottNatHAdd : HAdd_ ScottNat {
 }
 
-def sumScottNat {a : Type} (x : a) [hadd_ : HAdd_] : a = hadd_.add_ x x
+def sumScottNat {a : Type} (x : a) [hadd_ : HAdd_ a] : a = hadd_.add_ x x

@@ -1,8 +1,7 @@
 use alloc::boxed::Box;
 
 use crate::{
-    elaboration::{ElabState, subst},
-    spine::Term,
+    elaboration::{ElabState, subst}, module::name::QualifiedName, spine::Term
 };
 
 pub fn whnf(state: &ElabState, term: &Term) -> Term {
@@ -23,5 +22,13 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
         },
 
         _ => term.clone(),
+    }
+}
+
+pub fn head_const(term: &Term) -> Option<&QualifiedName> {
+    match term {
+        Term::Const(name) => Some(name),
+        Term::App(fun, _) => head_const(fun),
+        _ => None,
     }
 }

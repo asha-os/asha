@@ -17,6 +17,7 @@ use crate::{
     elaboration::{
         ctx::{LocalContext, MetavarContext},
         err::{ElabError, ElabErrorKind},
+        reduce::head_const,
     },
     module::{
         ModuleId,
@@ -329,7 +330,14 @@ impl ElabState {
                 SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
                 SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
             };
-            let elaborated_type = self.elaborate_term(binder_type_syntax, None);
+            let (elaborated_type, type_of_type) = self.elaborate_term_inner(binder_type_syntax);
+            let normalized_type_of_type = reduce::whnf(self, &type_of_type);
+            if !matches!(normalized_type_of_type, Term::Sort(_)) {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::TypeExpected(elaborated_type.clone()),
+                    binder.span(),
+                ));
+            }
             let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
             binder_fvars.push((fvar, info, elaborated_type));
         }
@@ -553,51 +561,44 @@ impl ElabState {
             SyntaxExpr::Proj { value, field, span } => {
                 let (elaborated_value, value_type) = self.elaborate_term_inner(value);
                 let normalized_value_type = reduce::whnf(self, &value_type);
-                match normalized_value_type {
-                    Term::Const(record_name) => {
-                        let namespace = record_name.display().unwrap().to_string();
-                        if let Some((proj_fn_name, proj_fn_type)) =
-                            self.resolve_name(&[namespace.clone()], field)
-                        {
-                            let proj_fn_term = Term::Const(proj_fn_name.clone());
-                            let (mut term, fn_type) = self.insert_implicit_args_until(
-                                proj_fn_term,
-                                proj_fn_type.clone(),
-                                BinderInfo::InstanceImplicit,
-                            );
-                            match fn_type {
-                                Term::Pi(_, _, body_ty) => {
-                                    let return_type =
-                                        subst::instantiate(&body_ty, &elaborated_value);
-                                    term = Term::App(Box::new(term), Box::new(elaborated_value));
-                                    return (term, return_type);
-                                }
-                                _ => {
-                                    self.errors.push(ElabError::new(
-                                        ElabErrorKind::NotAFunction(fn_type),
-                                        *span,
-                                    ));
-                                    return (self.erroneous_term(), self.erroneous_term());
-                                }
+                if let Some(record_name) = head_const(&normalized_value_type) {
+                    let namespace = record_name.display().unwrap().to_string();
+                    if let Some((proj_fn_name, proj_fn_type)) =
+                        self.resolve_name(&[namespace.clone()], field)
+                    {
+                        let proj_fn_term = Term::Const(proj_fn_name.clone());
+                        let (mut term, fn_type) = self.insert_implicit_args_until(
+                            proj_fn_term,
+                            proj_fn_type.clone(),
+                            BinderInfo::InstanceImplicit,
+                        );
+                        match fn_type {
+                            Term::Pi(_, _, body_ty) => {
+                                let return_type = subst::instantiate(&body_ty, &elaborated_value);
+                                term = Term::App(Box::new(term), Box::new(elaborated_value));
+                                (term, return_type)
                             }
-                        } else {
-                            self.errors.push(ElabError::new(
-                                ElabErrorKind::UndefinedVariable(format!(
-                                    "{}::{}",
-                                    namespace, field
-                                )),
-                                *span,
-                            ));
-                            (self.erroneous_term(), self.erroneous_term())
+                            _ => {
+                                self.errors.push(ElabError::new(
+                                    ElabErrorKind::NotAFunction(fn_type),
+                                    *span,
+                                ));
+                                (self.erroneous_term(), self.erroneous_term())
+                            }
                         }
-                    }
-                    _ => {
+                    } else {
                         self.errors.push(ElabError::new(
-                            ElabErrorKind::CannotProject(elaborated_value, field.clone()),
+                            ElabErrorKind::UndefinedVariable(format!("{}::{}", namespace, field)),
                             *span,
                         ));
                         (self.erroneous_term(), self.erroneous_term())
                     }
+                } else {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::CannotProject(elaborated_value, field.clone()),
+                        *span,
+                    ));
+                    (self.erroneous_term(), self.erroneous_term())
                 }
             }
             SyntaxExpr::Arrow {

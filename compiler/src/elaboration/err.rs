@@ -39,6 +39,9 @@ impl Display for ElabError {
             ElabErrorKind::CannotProject(term, field) => {
                 write!(f, "can't project field '{}' from '{}'", field, term)
             }
+            ElabErrorKind::TypeExpected(term) => {
+                write!(f, "type expected, got '{}'", term)
+            }
         }
     }
 }
@@ -55,6 +58,7 @@ pub enum ElabErrorKind {
     UnsupportedSyntax(crate::syntax::tree::SyntaxExpr),
     NotAFunction(crate::spine::Term),
     CannotProject(crate::spine::Term, String),
+    TypeExpected(crate::spine::Term),
 }
 
 impl miette::StdError for ElabError {}
