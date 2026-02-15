@@ -53,7 +53,10 @@ use crate::{
     spine::{BinderInfo, Level, Literal, Term},
     syntax::{
         Span, Spanned,
-        tree::{InfixOp, SyntaxBinder, SyntaxExpr},
+        tree::{
+            InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr, SyntaxTree,
+            SyntaxTreeDeclaration,
+        },
     },
 };
 
@@ -129,6 +132,9 @@ impl Environment {
         let mut externals = BTreeMap::new();
         externals.insert(PRIM_NAT, Term::Sort(Level::type0()));
         externals.insert(PRIM_STRING, Term::Sort(Level::type0()));
+        externals.insert(PRIM_BOOL, Term::Sort(Level::type0()));
+        externals.insert(PRIM_TRUE, Term::Const(PRIM_BOOL));
+        externals.insert(PRIM_FALSE, Term::Const(PRIM_BOOL));
         externals.insert(
             PRIM_FIN,
             Term::Pi(
@@ -188,6 +194,9 @@ impl Environment {
         root_namespace.decls.insert("Fin".into(), PRIM_FIN);
         root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
         root_namespace.decls.insert("IO".into(), PRIM_IO);
+        root_namespace.decls.insert("Bool".into(), PRIM_BOOL);
+        root_namespace.decls.insert("True".into(), PRIM_TRUE);
+        root_namespace.decls.insert("False".into(), PRIM_FALSE);
         root_namespace.children.insert(
             "Add".into(),
             Namespace {
@@ -363,44 +372,46 @@ impl ElabState {
             .and_then(|qn| self.env.lookup_type(qn))
     }
 
-    /// Dispatches a top-level syntax command to the appropriate elaboration handler.
-    pub fn elaborate_command(&mut self, cmd: &SyntaxExpr) {
-        match cmd {
-            SyntaxExpr::Def {
+    /// Dispatches a top-level declaration to the appropriate elaboration handler.
+    pub fn elaborate_declaration(&mut self, decl: &SyntaxTreeDeclaration) {
+        match decl {
+            SyntaxTreeDeclaration::Def {
                 name,
                 binders,
                 return_type,
                 body,
                 span,
             } => self.elaborate_def(name, binders, return_type, body, *span),
-            SyntaxExpr::Record {
+            SyntaxTreeDeclaration::Record {
                 name,
                 binders,
                 fields,
                 span,
             } => self.elaborate_record(name, binders, fields, *span),
-            SyntaxExpr::Extern {
+            SyntaxTreeDeclaration::Extern {
                 name,
                 type_ann,
                 span,
             } => self.elaborate_extern(name, type_ann, *span),
-            SyntaxExpr::Inductive {
+            SyntaxTreeDeclaration::Inductive {
                 name,
                 binders,
                 constructors,
                 span,
             } => self.elaborate_inductive(name, binders, constructors, *span),
-            SyntaxExpr::Class {
+            SyntaxTreeDeclaration::Class {
                 name,
                 binders,
                 members,
                 span,
             } => self.elaborate_class(name, binders, members, *span),
-            SyntaxExpr::Eval { expr, .. } => {
+            SyntaxTreeDeclaration::Instance { .. } => {
+                // todo: implement instance elaboration
+            }
+            SyntaxTreeDeclaration::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", &term);
             }
-            _ => (),
         }
     }
 
@@ -830,7 +841,7 @@ impl ElabState {
         &mut self,
         name: &str,
         binders: &[SyntaxBinder],
-        fields: &[SyntaxExpr],
+        fields: &[RecordField],
         span: Span,
     ) {
         let record_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
@@ -840,33 +851,23 @@ impl ElabState {
         let binder_fvars = self.elaborate_binders(binders);
         let mut constructor_type = Term::Const(record_name.clone());
         for field in fields {
-            match field {
-                SyntaxExpr::RecordField { name, type_ann, .. } => {
-                    let field_name = QualifiedName::User(self.gen_.fresh(name.clone()));
-                    let field_type = self.elaborate_term(type_ann, None);
-                    // todo: make this a def
-                    let field_def = Declaration::Constructor {
-                        name: field_name.clone(),
-                        type_: field_type.clone(),
-                        span: field.span(),
-                    };
+            let field_name = QualifiedName::User(self.gen_.fresh(field.name.clone()));
+            let field_type = self.elaborate_term(&field.type_ann, None);
+            // todo: make this a def
+            let field_def = Declaration::Constructor {
+                name: field_name.clone(),
+                type_: field_type.clone(),
+                span: field.span,
+            };
 
-                    self.env.decls.insert(field_name.clone(), field_def);
-                    child_ns.decls.insert(name.clone(), field_name);
+            self.env.decls.insert(field_name.clone(), field_def);
+            child_ns.decls.insert(field.name.clone(), field_name);
 
-                    constructor_type = Term::Pi(
-                        BinderInfo::Explicit,
-                        Box::new(field_type),
-                        Box::new(constructor_type),
-                    );
-                }
-                _ => {
-                    self.errors.push(ElabError::new(
-                        ElabErrorKind::UnsupportedSyntax(field.clone()),
-                        field.span(),
-                    ));
-                }
-            }
+            constructor_type = Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(field_type),
+                Box::new(constructor_type),
+            );
         }
 
         let pi_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::Zero));
@@ -938,7 +939,7 @@ impl ElabState {
         &mut self,
         name: &str,
         binders: &[SyntaxBinder],
-        constructors: &[SyntaxExpr],
+        constructors: &[InductiveConstructor],
         span: Span,
     ) {
         let name = QualifiedName::User(self.gen_.fresh(name.to_string()));
@@ -986,51 +987,38 @@ impl ElabState {
         inductive_namespace: &mut Namespace,
         inductive_name: &QualifiedName,
         binders: &[(Unique, BinderInfo, Term)],
-        constructors: &[SyntaxExpr],
+        constructors: &[InductiveConstructor],
     ) {
         for constructor in constructors {
-            match constructor {
-                SyntaxExpr::InductiveConstructor {
-                    name,
-                    binders: ctor_binders,
-                    type_ann,
-                    span,
-                } => {
-                    let ctor_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
-                    let saved_lctx = self.lctx.clone();
+            let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.to_string()));
+            let saved_lctx = self.lctx.clone();
 
-                    let ctor_binder_fvars = self.elaborate_binders(ctor_binders);
+            let ctor_binder_fvars = self.elaborate_binders(&constructor.binders);
 
-                    let base_type = if let Some(type_ann) = type_ann {
-                        self.elaborate_term(type_ann, None)
-                    } else {
-                        Term::Const(inductive_name.clone())
-                    };
+            let base_type = if let Some(type_ann) = &constructor.type_ann {
+                self.elaborate_term(type_ann, None)
+            } else {
+                Term::Const(inductive_name.clone())
+            };
 
-                    let constructor_type = Self::abstract_binders(
-                        binders,
-                        Self::abstract_binders(&ctor_binder_fvars, base_type),
-                    );
+            let constructor_type = Self::abstract_binders(
+                binders,
+                Self::abstract_binders(&ctor_binder_fvars, base_type),
+            );
 
-                    self.env.decls.insert(
-                        ctor_name.clone(),
-                        Declaration::Constructor {
-                            name: ctor_name.clone(),
-                            type_: constructor_type,
-                            span: *span,
-                        },
-                    );
+            self.env.decls.insert(
+                ctor_name.clone(),
+                Declaration::Constructor {
+                    name: ctor_name.clone(),
+                    type_: constructor_type,
+                    span: constructor.span,
+                },
+            );
 
-                    inductive_namespace.decls.insert(name.clone(), ctor_name);
-                    self.lctx = saved_lctx;
-                }
-                _ => {
-                    self.errors.push(ElabError::new(
-                        ElabErrorKind::UnsupportedSyntax(constructor.clone()),
-                        constructor.span(),
-                    ));
-                }
-            }
+            inductive_namespace
+                .decls
+                .insert(constructor.name.clone(), ctor_name);
+            self.lctx = saved_lctx;
         }
     }
 
@@ -1044,7 +1032,7 @@ impl ElabState {
         &mut self,
         name_str: &str,
         binders: &[SyntaxBinder],
-        members: &[SyntaxExpr],
+        members: &[RecordField],
         span: Span,
     ) {
         let name = QualifiedName::User(self.gen_.fresh(name_str.to_string()));
@@ -1053,41 +1041,28 @@ impl ElabState {
 
         let binder_fvars = self.elaborate_binders(binders);
         for member in members {
-            match member {
-                SyntaxExpr::RecordField {
-                    name: field_name,
-                    type_ann,
-                    span,
-                } => {
-                    let field_display_name = field_name.clone();
-                    let field_name = QualifiedName::User(self.gen_.fresh(field_name.clone()));
-                    let field_type = self.elaborate_term(type_ann, None);
-                    let mut applied_class = Term::Const(name.clone());
-                    for (fvar, _, _) in &binder_fvars {
-                        applied_class =
-                            Term::App(Box::new(applied_class), Box::new(Term::FVar(fvar.clone())));
-                    }
-                    let wrapped_type = Term::Pi(
-                        BinderInfo::InstanceImplicit,
-                        Box::new(applied_class),
-                        Box::new(field_type.clone()),
-                    );
-                    let wrapped_type = Self::abstract_binders(&binder_fvars, wrapped_type);
-                    let field_def = Declaration::Constructor {
-                        name: field_name.clone(),
-                        type_: wrapped_type.clone(),
-                        span: span.clone(),
-                    };
-                    self.env.decls.insert(field_name.clone(), field_def);
-                    child_ns.decls.insert(field_display_name, field_name);
-                }
-                _ => {
-                    self.errors.push(ElabError::new(
-                        ElabErrorKind::UnsupportedSyntax(member.clone()),
-                        member.span(),
-                    ));
-                }
+            let field_display_name = member.name.clone();
+            let field_name = QualifiedName::User(self.gen_.fresh(member.name.clone()));
+            let field_type = self.elaborate_term(&member.type_ann, None);
+            let mut applied_class = Term::Const(name.clone());
+            for (fvar, _, _) in &binder_fvars {
+                applied_class =
+                    Term::App(Box::new(applied_class), Box::new(Term::FVar(fvar.clone())));
             }
+            let wrapped_type = Term::Pi(
+                BinderInfo::InstanceImplicit,
+                Box::new(applied_class),
+                Box::new(field_type.clone()),
+            );
+            let wrapped_type = Self::abstract_binders(&binder_fvars, wrapped_type);
+            // todo: make this a def
+            let field_def = Declaration::Constructor {
+                name: field_name.clone(),
+                type_: wrapped_type.clone(),
+                span: member.span,
+            };
+            self.env.decls.insert(field_name.clone(), field_def);
+            child_ns.decls.insert(field_display_name, field_name);
         }
 
         let class_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::Zero));
@@ -1119,21 +1094,16 @@ impl ElabState {
 
 /// Entry point for elaboration: type-checks an entire source file.
 ///
-/// Takes a module identifier and the parsed [`SyntaxExpr::Root`] and produces either
+/// Takes a module identifier and the parsed [`SyntaxTree`] and produces either
 /// a fully elaborated [`Environment`] or a list of accumulated [`ElabError`]s.
 pub fn elaborate_file(
     module_id: ModuleId,
-    root: &SyntaxExpr,
+    tree: &SyntaxTree,
 ) -> Result<Environment, Vec<ElabError>> {
     let mut state = ElabState::pre_loaded(module_id);
 
-    match root {
-        SyntaxExpr::Root(commands) => {
-            for cmd in commands {
-                state.elaborate_command(cmd);
-            }
-        }
-        _ => panic!("expected a root syntax expression"),
+    for decl in &tree.declarations {
+        state.elaborate_declaration(decl);
     }
 
     if state.errors.is_empty() {

@@ -20,6 +20,9 @@ pub enum IntrinsicName {
     Nat,
     Str,
     Fin,
+    Bool,
+    True,
+    False,
     Array,
     ArrayNil,
     ArrayCons,
@@ -50,6 +53,9 @@ impl IntrinsicName {
     pub fn name(&self) -> &str {
         match self {
             IntrinsicName::Nat => "Nat",
+            IntrinsicName::Bool => "Bool",
+            IntrinsicName::True => "True",
+            IntrinsicName::False => "False",
             IntrinsicName::Str => "Str",
             IntrinsicName::Fin => "Fin",
             IntrinsicName::Array => "Array",

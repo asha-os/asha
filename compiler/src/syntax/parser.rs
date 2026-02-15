@@ -12,7 +12,10 @@ use crate::{
         error::{ParseError, ParseErrorKind},
         spanning,
         token::{Token, TokenKind},
-        tree::{InfixOp, SyntaxBinder, SyntaxExpr as Expr},
+        tree::{
+            InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr as Expr,
+            SyntaxTree, SyntaxTreeDeclaration as Decl,
+        },
     },
 };
 
@@ -58,7 +61,7 @@ fn lexeme_to_string(lexeme: &[u8]) -> String {
 pub fn parse<'a>(
     tokens: &'a [(Token<'a>, Span)],
     eoi_span: Span,
-) -> (Option<Expr>, Vec<ParseError>) {
+) -> (Option<SyntaxTree>, Vec<ParseError>) {
     let input = tokens.split_token_span(eoi_span);
 
     let parser = program();
@@ -69,10 +72,10 @@ pub fn parse<'a>(
     (output, errors)
 }
 
-fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+fn program<'a>() -> impl Parser<'a, ParserInput<'a>, SyntaxTree, ParserExtra<'a>> {
     let mut expr = Recursive::declare();
 
-    let def = choice((
+    let decl = choice((
         def_parser(expr.clone()),
         eval_parser(expr.clone()),
         record_parser(expr.clone()),
@@ -84,13 +87,13 @@ fn program<'a>() -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
 
     expr.define(expr_impl(expr.clone()));
 
-    let defs = def.repeated().collect();
-    defs.map(Expr::Root)
+    let decls = decl.repeated().collect();
+    decls.map(|declarations| SyntaxTree { declarations })
 }
 
 fn record_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Record)
         .then(just_token(TokenKind::UpperIdentifier))
         .then(
@@ -103,7 +106,7 @@ fn record_parser<'a>(
                 .then(just_token(TokenKind::RBrace)),
         )
         .map(
-            |((record_tok, name_tok), ((binders, fields), rbraces))| Expr::Record {
+            |((record_tok, name_tok), ((binders, fields), rbraces))| Decl::Record {
                 span: spanning(&record_tok, &rbraces),
                 name: lexeme_to_string(name_tok.lexeme),
                 binders,
@@ -114,7 +117,7 @@ fn record_parser<'a>(
 
 fn record_fields_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Vec<RecordField>, ParserExtra<'a>> {
     just_token(TokenKind::LowerIdentifier)
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr)
@@ -123,7 +126,7 @@ fn record_fields_parser<'a>(
         .map(|fields| {
             fields
                 .into_iter()
-                .map(|(name, ty)| Expr::RecordField {
+                .map(|(name, ty)| RecordField {
                     span: spanning(&name, &ty),
                     name: lexeme_to_string(name.lexeme),
                     type_ann: Box::new(ty),
@@ -134,7 +137,7 @@ fn record_fields_parser<'a>(
 
 fn def_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Def)
         .ignore_then(just_token(TokenKind::LowerIdentifier))
         .then(
@@ -143,10 +146,9 @@ fn def_parser<'a>(
                 .collect()
                 .then_ignore(just_token(TokenKind::Colon))
                 .then(expr.clone())
-                .then_ignore(just_token(TokenKind::Equal))
-                .then(expr),
+                .then(def_body_parser(expr.clone())),
         )
-        .map(|(name, ((binders, ret_type), body))| Expr::Def {
+        .map(|(name, ((binders, ret_type), body))| Decl::Def {
             span: spanning(&name, &body),
             name: lexeme_to_string(name.lexeme),
             binders,
@@ -155,9 +157,15 @@ fn def_parser<'a>(
         })
 }
 
-fn class_parser<'a>(
+fn def_body_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+    just_token(TokenKind::Equal).ignore_then(expr)
+}
+
+fn class_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Class)
         .then(just_token(TokenKind::UpperIdentifier))
         .then(
@@ -170,18 +178,38 @@ fn class_parser<'a>(
                 .then(just_token(TokenKind::RBrace)),
         )
         .map(
-            |((class_tok, name_tok), ((binders, fields), rbraces))| Expr::Class {
+            |((class_tok, name_tok), ((binders, members), rbraces))| Decl::Class {
                 span: spanning(&class_tok, &rbraces),
                 name: lexeme_to_string(name_tok.lexeme),
                 binders,
-                members: fields,
+                members,
             },
         )
 }
 
+fn instance_members_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Vec<crate::syntax::tree::InstanceMember>, ParserExtra<'a>> {
+    just_token(TokenKind::LowerIdentifier)
+        .then_ignore(just_token(TokenKind::Equal))
+        .then(expr)
+        .separated_by(just_token(TokenKind::Comma))
+        .collect::<Vec<_>>()
+        .map(|members| {
+            members
+                .into_iter()
+                .map(|(name, value)| crate::syntax::tree::InstanceMember {
+                    span: spanning(&name, &value),
+                    name: lexeme_to_string(name.lexeme),
+                    value: Box::new(value),
+                })
+                .collect()
+        })
+}
+
 fn instance_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Instance)
         .then(just_token(TokenKind::LowerIdentifier))
         .then(
@@ -191,24 +219,26 @@ fn instance_parser<'a>(
                 .then_ignore(just_token(TokenKind::Colon))
                 .then(expr.clone())
                 .then_ignore(just_token(TokenKind::LBrace))
-                .then(record_fields_parser(expr))
+                .then(instance_members_parser(expr))
                 .then_ignore(just_token(TokenKind::Comma).or_not())
                 .then(just_token(TokenKind::RBrace)),
         )
         .map(
-            |((instance_tok, name_tok), (((binders, type_ann), fields), rbraces))| Expr::Instance {
-                span: spanning(&instance_tok, &rbraces),
-                name: lexeme_to_string(name_tok.lexeme),
-                binders,
-                type_ann: Box::new(type_ann),
-                members: fields,
+            |((instance_tok, name_tok), (((binders, type_ann), members), rbraces))| {
+                Decl::Instance {
+                    span: spanning(&instance_tok, &rbraces),
+                    name: lexeme_to_string(name_tok.lexeme),
+                    binders,
+                    type_ann: Box::new(type_ann),
+                    members,
+                }
             },
         )
 }
 
 fn inductive_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Inductive)
         .then(just_token(TokenKind::UpperIdentifier))
         .then(
@@ -221,7 +251,7 @@ fn inductive_parser<'a>(
                 .then(just_token(TokenKind::RBrace)),
         )
         .map(
-            |((inductive_tok, name_tok), ((binders, constructors), rbraces))| Expr::Inductive {
+            |((inductive_tok, name_tok), ((binders, constructors), rbraces))| Decl::Inductive {
                 span: spanning(&inductive_tok, &rbraces),
                 name: lexeme_to_string(name_tok.lexeme),
                 binders,
@@ -232,7 +262,7 @@ fn inductive_parser<'a>(
 
 fn inductive_constructors_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Vec<Expr>, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Vec<InductiveConstructor>, ParserExtra<'a>> {
     just_token(TokenKind::LowerIdentifier)
         .then(
             binder(expr.clone()).repeated().collect::<Vec<_>>().then(
@@ -246,7 +276,7 @@ fn inductive_constructors_parser<'a>(
         .map(|constructors| {
             constructors
                 .into_iter()
-                .map(|(name, (binders, ty))| Expr::InductiveConstructor {
+                .map(|(name, (binders, ty))| InductiveConstructor {
                     span: name.span, // todo: extend this
                     name: lexeme_to_string(name.lexeme),
                     binders,
@@ -258,11 +288,11 @@ fn inductive_constructors_parser<'a>(
 
 fn eval_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Eval)
         .then(expr)
         .then_ignore(just_token(TokenKind::Semicolon))
-        .map(|(tok, expr)| Expr::Eval {
+        .map(|(tok, expr)| Decl::Eval {
             span: spanning(&tok, &expr),
             expr: Box::new(expr),
         })
@@ -270,12 +300,12 @@ fn eval_parser<'a>(
 
 fn extern_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
     just_token(TokenKind::Extern)
         .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr)
-        .map(|((extern_tok, name), ty)| Expr::Extern {
+        .map(|((extern_tok, name), ty)| Decl::Extern {
             span: spanning(&extern_tok, &ty),
             name: lexeme_to_string(name.lexeme),
             type_ann: Box::new(ty),

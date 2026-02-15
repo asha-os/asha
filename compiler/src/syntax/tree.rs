@@ -21,8 +21,12 @@ pub enum InfixOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyntaxExpr {
-    Root(Vec<SyntaxExpr>),
+pub struct SyntaxTree {
+    pub declarations: Vec<SyntaxTreeDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxTreeDeclaration {
     Def {
         name: String,
         binders: Vec<SyntaxBinder>,
@@ -30,6 +34,73 @@ pub enum SyntaxExpr {
         body: Box<SyntaxExpr>,
         span: Span,
     },
+    Class {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        members: Vec<RecordField>,
+        span: Span,
+    },
+    Instance {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        type_ann: Box<SyntaxExpr>,
+        members: Vec<InstanceMember>,
+        span: Span,
+    },
+    Record {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        fields: Vec<RecordField>,
+        span: Span,
+    },
+    Extern {
+        name: String,
+        type_ann: Box<SyntaxExpr>,
+        span: Span,
+    },
+    Inductive {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        constructors: Vec<InductiveConstructor>,
+        span: Span,
+    },
+    Eval {
+        expr: Box<SyntaxExpr>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordField {
+    pub name: String,
+    pub type_ann: Box<SyntaxExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordLiteralField {
+    pub name: String,
+    pub value: Box<SyntaxExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceMember {
+    pub name: String,
+    pub value: Box<SyntaxExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InductiveConstructor {
+    pub name: String,
+    pub binders: Vec<SyntaxBinder>,
+    pub type_ann: Option<Box<SyntaxExpr>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxExpr {
     Var {
         namespace: Vec<String>,
         member: String,
@@ -91,66 +162,36 @@ pub enum SyntaxExpr {
         codomain: Box<SyntaxExpr>,
         span: Span,
     },
-    Eval {
-        expr: Box<SyntaxExpr>,
-        span: Span,
-    },
-    Class {
-        name: String,
-        binders: Vec<SyntaxBinder>,
-        members: Vec<SyntaxExpr>,
-        span: Span,
-    },
-    Instance {
-        name: String,
-        binders: Vec<SyntaxBinder>,
-        type_ann: Box<SyntaxExpr>,
-        members: Vec<SyntaxExpr>,
-        span: Span,
-    },
-    Record {
-        name: String,
-        binders: Vec<SyntaxBinder>,
-        fields: Vec<SyntaxExpr>,
-        span: Span,
-    },
-    RecordField {
-        name: String,
-        type_ann: Box<SyntaxExpr>,
-        span: Span,
-    },
-    RecordLiteral {
-        fields: Vec<SyntaxExpr>,
-        span: Span,
-    },
-    RecordLiteralField {
-        name: String,
-        value: Box<SyntaxExpr>,
-        span: Span,
-    },
-    Extern {
-        name: String,
-        type_ann: Box<SyntaxExpr>,
-        span: Span,
-    },
-    Inductive {
-        name: String,
-        binders: Vec<SyntaxBinder>,
-        constructors: Vec<SyntaxExpr>,
-        span: Span,
-    },
-    InductiveConstructor {
-        name: String,
-        binders: Vec<SyntaxBinder>,
-        type_ann: Option<Box<SyntaxExpr>>,
-        span: Span,
-    },
     InfixOp {
         op: InfixOp,
         lhs: Box<SyntaxExpr>,
         rhs: Box<SyntaxExpr>,
         span: Span,
     },
+    RecordLiteral {
+        fields: Vec<RecordLiteralField>,
+        span: Span,
+    },
+    Match {
+        scrutinees: Vec<SyntaxExpr>,
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub patterns: Vec<Pattern>,
+    pub rhs: Box<SyntaxExpr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pattern {
+    Var(String, Span),
+    Constructor(Vec<String>, String, Vec<Pattern>, Span),
+    Lit(Literal, Span),
+    Wildcard(Span),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,12 +204,6 @@ pub enum SyntaxBinder {
 impl Spanned for SyntaxExpr {
     fn span(&self) -> Span {
         match self {
-            SyntaxExpr::Root(_) => Span {
-                file: 0,
-                start: 0,
-                end: 0,
-            },
-            SyntaxExpr::Def { span, .. } => *span,
             SyntaxExpr::Var { span, .. } => *span,
             SyntaxExpr::Constructor { span, .. } => *span,
             SyntaxExpr::App { span, .. } => *span,
@@ -182,18 +217,10 @@ impl Spanned for SyntaxExpr {
             SyntaxExpr::Array { span, .. } => *span,
             SyntaxExpr::Pi { span, .. } => *span,
             SyntaxExpr::Sigma { span, .. } => *span,
-            SyntaxExpr::Eval { span, .. } => *span,
-            SyntaxExpr::Class { span, .. } => *span,
-            SyntaxExpr::Instance { span, .. } => *span,
-            SyntaxExpr::Record { span, .. } => *span,
-            SyntaxExpr::RecordField { span, .. } => *span,
-            SyntaxExpr::RecordLiteral { span, .. } => *span,
-            SyntaxExpr::RecordLiteralField { span, .. } => *span,
-            SyntaxExpr::Extern { span, .. } => *span,
             SyntaxExpr::Unit(span) => *span,
-            SyntaxExpr::Inductive { span, .. } => *span,
-            SyntaxExpr::InductiveConstructor { span, .. } => *span,
             SyntaxExpr::InfixOp { span, .. } => *span,
+            SyntaxExpr::RecordLiteral { span, .. } => *span,
+            SyntaxExpr::Match { span, .. } => *span,
         }
     }
 }

@@ -1,0 +1,8 @@
+inductive ScottNat {
+    zero : ScottNat,
+    succ : ScottNat -> ScottNat
+}
+
+def is_zero : ScottNat -> Bool
+    | ScottNat::zero => true
+    | ScottNat::succ _ => false
