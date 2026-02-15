@@ -726,6 +726,22 @@ impl ElabState {
                     Term::Sort(Level::Zero),
                 )
             }
+            SyntaxExpr::Lambda { binders, body, .. } => {
+                let saved_lctx = self.lctx.clone();
+                let binder_fvars = self.elaborate_binders(binders);
+                let (elaborated_body, body_type) = self.elaborate_term_inner(body);
+                let mut term = elaborated_body;
+                let mut result_type = body_type;
+                for (fvar, info, ty) in binder_fvars.iter().rev() {
+                    term = subst::abstract_fvar(&term, fvar.clone());
+                    term = Term::Lam(info.clone(), Box::new(ty.clone()), Box::new(term));
+                    result_type = subst::abstract_fvar(&result_type, fvar.clone());
+                    result_type =
+                        Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(result_type));
+                }
+                self.lctx = saved_lctx;
+                (term, result_type)
+            }
             SyntaxExpr::Unit { .. } => (Term::Unit, Term::Sort(Level::Zero)),
             u => {
                 self.errors.push(ElabError::new(
