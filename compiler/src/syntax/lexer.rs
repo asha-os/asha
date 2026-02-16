@@ -388,6 +388,14 @@ impl<'a> Iterator for Lexer<'a> {
                     span: self.cursor.span_from(start),
                 }))
             }
+            '|' => {
+                self.cursor.advance(1);
+                Some(Ok(Token {
+                    kind: TokenKind::Pipe,
+                    lexeme: &source[start..self.cursor.byte_offset],
+                    span: self.cursor.span_from(start),
+                }))
+            }
             '!' => {
                 self.cursor.advance(1);
                 if self.cursor.byte_offset < source.len() && source[self.cursor.byte_offset] == b'='

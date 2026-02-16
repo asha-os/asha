@@ -43,6 +43,7 @@ pub enum TokenKind {
     Underscore,
     Plus,
     Minus,
+    Pipe,
     Star,
     Slash,
     EqualEqual,

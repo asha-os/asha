@@ -137,6 +137,7 @@ impl fmt::Display for TokenKind {
             TokenKind::LBracket => write!(f, "`[`"),
             TokenKind::RBracket => write!(f, "`]`"),
             TokenKind::Semicolon => write!(f, "`;`"),
+            TokenKind::Pipe => write!(f, "`|`"),
             TokenKind::Arrow => write!(f, "`->`"),
             TokenKind::Product => write!(f, "`><`"),
             TokenKind::EndOfFile => write!(f, "end of file"),

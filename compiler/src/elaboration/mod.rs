@@ -54,8 +54,7 @@ use crate::{
     syntax::{
         Span, Spanned,
         tree::{
-            InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr, SyntaxTree,
-            SyntaxTreeDeclaration,
+            DefBody, InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr, SyntaxTree, SyntaxTreeDeclaration
         },
     },
 };
@@ -467,9 +466,19 @@ impl ElabState {
         name: &str,
         binders: &[SyntaxBinder],
         return_type: &SyntaxExpr,
-        body: &SyntaxExpr,
+        body: &DefBody,
         span: Span,
     ) {
+        let body = match body {
+            DefBody::Expr(e) => e,
+            DefBody::PatternMatch { .. } => {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::UnsupportedSyntax(return_type.clone()),
+                    span,
+                ));
+                return;
+            }
+        };
         let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
         let saved_lctx = self.lctx.clone();

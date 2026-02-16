@@ -13,8 +13,8 @@ use crate::{
         spanning,
         token::{Token, TokenKind},
         tree::{
-            InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr as Expr,
-            SyntaxTree, SyntaxTreeDeclaration as Decl,
+            DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxBinder,
+            SyntaxExpr as Expr, SyntaxPattern, SyntaxTree, SyntaxTreeDeclaration as Decl,
         },
     },
 };
@@ -56,6 +56,56 @@ fn just_token<'a>(
 
 fn lexeme_to_string(lexeme: &[u8]) -> String {
     String::from_utf8_lossy(lexeme).into_owned()
+}
+
+struct QualifiedName {
+    namespace: Vec<String>,
+    name: String,
+    is_upper: bool,
+    span: Span,
+}
+
+fn qualified_name_parser<'a>()
+-> impl Parser<'a, ParserInput<'a>, QualifiedName, ParserExtra<'a>> + Clone {
+    let ident = choice((
+        just_token(TokenKind::LowerIdentifier),
+        just_token(TokenKind::UpperIdentifier),
+    ));
+
+    let qualified = ident
+        .clone()
+        .then(
+            just_token(TokenKind::DoubleColon)
+                .ignore_then(ident.clone())
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .map(|(first, rest)| {
+            if rest.is_empty() {
+                QualifiedName {
+                    namespace: Vec::new(),
+                    name: lexeme_to_string(first.lexeme),
+                    is_upper: first.kind == TokenKind::UpperIdentifier,
+                    span: first.span,
+                }
+            } else {
+                let mut namespace = alloc::vec![lexeme_to_string(first.lexeme)];
+                let last = rest.last().unwrap();
+                let span = spanning(&first, last);
+                let is_upper = last.kind == TokenKind::UpperIdentifier;
+                for tok in &rest[..rest.len() - 1] {
+                    namespace.push(lexeme_to_string(tok.lexeme));
+                }
+                QualifiedName {
+                    namespace,
+                    name: lexeme_to_string(last.lexeme),
+                    is_upper,
+                    span,
+                }
+            }
+        });
+
+    qualified
 }
 
 pub fn parse<'a>(
@@ -152,15 +202,111 @@ fn def_parser<'a>(
             span: spanning(&name, &body),
             name: lexeme_to_string(name.lexeme),
             binders,
-            return_type: Box::new(ret_type),
-            body: Box::new(body),
+            return_type: ret_type,
+            body: body,
         })
 }
 
 fn def_body_parser<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
-) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> {
-    just_token(TokenKind::Equal).ignore_then(expr)
+) -> impl Parser<'a, ParserInput<'a>, DefBody, ParserExtra<'a>> {
+    let single_expr = just_token(TokenKind::Equal)
+        .ignore_then(expr.clone())
+        .map(DefBody::Expr);
+
+    let pattern_match = pattern_match_arms_parser(expr).map(|arms| DefBody::PatternMatch {
+        span: arms.span(),
+        arms,
+    });
+
+    choice((single_expr, pattern_match))
+}
+
+fn pattern_match_arms_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Vec<PatternMatchArm>, ParserExtra<'a>> {
+    just_token(TokenKind::Pipe)
+        .ignore_then(pattern_match_arm_parser(expr.clone()))
+        .repeated()
+        .at_least(1)
+        .collect()
+}
+
+fn pattern_match_arm_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, PatternMatchArm, ParserExtra<'a>> {
+    pattern_parser(expr.clone())
+        .separated_by(just_token(TokenKind::Comma))
+        .collect::<Vec<_>>()
+        .then_ignore(just_token(TokenKind::FatArrow))
+        .then(expr)
+        .map(|(patterns, rhs)| PatternMatchArm {
+            span: spanning(&patterns[0], &rhs),
+            patterns,
+            rhs: Box::new(rhs),
+        })
+}
+
+fn pattern_parser<'a>(
+    _expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, SyntaxPattern, ParserExtra<'a>> + Clone {
+    recursive(|pattern| {
+        let wildcard = just_token(TokenKind::Underscore).map(|t| SyntaxPattern::Wildcard(t.span));
+
+        let tuple_or_grouped = just_token(TokenKind::LParen)
+            .then(
+                pattern
+                    .clone()
+                    .separated_by(just_token(TokenKind::Comma))
+                    .collect::<Vec<_>>(),
+            )
+            .then(just_token(TokenKind::RParen))
+            .map(|((lparen, patterns), rparen)| match patterns.len() {
+                1 => patterns.into_iter().next().unwrap(),
+                _ => SyntaxPattern::Tuple {
+                    elements: patterns,
+                    span: spanning(&lparen, &rparen),
+                },
+            });
+
+        let constructor = qualified_name_parser()
+            .then(pattern.clone().repeated().collect::<Vec<_>>())
+            .map(|(qn, args)| {
+                if qn.is_upper || !qn.namespace.is_empty() {
+                    let span = if args.is_empty() {
+                        qn.span
+                    } else {
+                        Span {
+                            file: qn.span.file,
+                            start: qn.span.start,
+                            end: args.last().unwrap().span().end,
+                        }
+                    };
+                    SyntaxPattern::Constructor {
+                        namespace: qn.namespace,
+                        name: qn.name,
+                        args,
+                        span,
+                    }
+                } else if args.is_empty() {
+                    SyntaxPattern::Var(qn.name, qn.span)
+                } else {
+                    let span = Span {
+                        file: qn.span.file,
+                        start: qn.span.start,
+                        end: args.last().unwrap().span().end,
+                    };
+                    SyntaxPattern::Constructor {
+                        namespace: qn.namespace,
+                        name: qn.name,
+                        args,
+                        span,
+                    }
+                }
+            });
+
+        choice((wildcard, tuple_or_grouped, constructor))
+    })
 }
 
 fn class_parser<'a>(
@@ -201,7 +347,7 @@ fn instance_members_parser<'a>(
                 .map(|(name, value)| crate::syntax::tree::InstanceMember {
                     span: spanning(&name, &value),
                     name: lexeme_to_string(name.lexeme),
-                    value: Box::new(value),
+                    value,
                 })
                 .collect()
         })
@@ -229,7 +375,7 @@ fn instance_parser<'a>(
                     span: spanning(&instance_tok, &rbraces),
                     name: lexeme_to_string(name_tok.lexeme),
                     binders,
-                    type_ann: Box::new(type_ann),
+                    type_ann,
                     members,
                 }
             },
@@ -276,11 +422,11 @@ fn inductive_constructors_parser<'a>(
         .map(|constructors| {
             constructors
                 .into_iter()
-                .map(|(name, (binders, ty))| InductiveConstructor {
+                .map(|(name, (binders, type_ann))| InductiveConstructor {
                     span: name.span, // todo: extend this
                     name: lexeme_to_string(name.lexeme),
                     binders,
-                    type_ann: ty.map(Box::new),
+                    type_ann,
                 })
                 .collect()
         })
@@ -294,7 +440,7 @@ fn eval_parser<'a>(
         .then_ignore(just_token(TokenKind::Semicolon))
         .map(|(tok, expr)| Decl::Eval {
             span: spanning(&tok, &expr),
-            expr: Box::new(expr),
+            expr,
         })
 }
 
@@ -305,10 +451,10 @@ fn extern_parser<'a>(
         .then(just_token(TokenKind::LowerIdentifier))
         .then_ignore(just_token(TokenKind::Colon))
         .then(expr)
-        .map(|((extern_tok, name), ty)| Decl::Extern {
-            span: spanning(&extern_tok, &ty),
+        .map(|((extern_tok, name), type_ann)| Decl::Extern {
+            span: spanning(&extern_tok, &type_ann),
             name: lexeme_to_string(name.lexeme),
-            type_ann: Box::new(ty),
+            type_ann,
         })
 }
 
@@ -523,54 +669,20 @@ fn expr_impl<'a>(
 fn expr_atom<'a>(
     expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
 ) -> impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone {
-    let ident = choice((
-        just_token(TokenKind::LowerIdentifier),
-        just_token(TokenKind::UpperIdentifier),
-    ));
-
-    let qualified = ident
-        .clone()
-        .then(
-            just_token(TokenKind::DoubleColon)
-                .ignore_then(ident.clone())
-                .repeated()
-                .at_least(1)
-                .collect::<Vec<_>>(),
-        )
-        .map(|(first, rest)| {
-            let mut namespace = alloc::vec![lexeme_to_string(first.lexeme)];
-            let last = rest.last().unwrap();
-            let span = spanning(&first, last);
-            let is_upper = last.kind == TokenKind::UpperIdentifier;
-            for tok in &rest[..rest.len() - 1] {
-                namespace.push(lexeme_to_string(tok.lexeme));
+    let named = qualified_name_parser().map(|qn| {
+        if qn.is_upper {
+            Expr::Constructor {
+                name: qn.name,
+                namespace: qn.namespace,
+                span: qn.span,
             }
-            let member = lexeme_to_string(last.lexeme);
-            if is_upper {
-                Expr::Constructor {
-                    name: member,
-                    namespace,
-                    span,
-                }
-            } else {
-                Expr::Var {
-                    namespace,
-                    member,
-                    span,
-                }
+        } else {
+            Expr::Var {
+                namespace: qn.namespace,
+                member: qn.name,
+                span: qn.span,
             }
-        });
-
-    let var = just_token(TokenKind::LowerIdentifier).map(|t| Expr::Var {
-        namespace: Vec::new(),
-        member: lexeme_to_string(t.lexeme),
-        span: t.span,
-    });
-
-    let constructor = just_token(TokenKind::UpperIdentifier).map(|t| Expr::Constructor {
-        name: lexeme_to_string(t.lexeme),
-        namespace: Vec::new(),
-        span: t.span,
+        }
     });
 
     let number = just_token(TokenKind::Number).map(|t| {
@@ -621,16 +733,7 @@ fn expr_atom<'a>(
             span: spanning(&lbracket, &rbracket),
         });
 
-    choice((
-        qualified,
-        var,
-        constructor,
-        number,
-        string,
-        hole,
-        tuple_or_grouped,
-        array,
-    ))
+    choice((named, number, string, hole, tuple_or_grouped, array))
 }
 
 fn rich_to_parse_error(err: Rich<'_, Token<'_>, Span>) -> ParseError {

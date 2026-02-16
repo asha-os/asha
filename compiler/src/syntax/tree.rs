@@ -30,8 +30,8 @@ pub enum SyntaxTreeDeclaration {
     Def {
         name: String,
         binders: Vec<SyntaxBinder>,
-        return_type: Box<SyntaxExpr>,
-        body: Box<SyntaxExpr>,
+        return_type: SyntaxExpr,
+        body: DefBody,
         span: Span,
     },
     Class {
@@ -43,7 +43,7 @@ pub enum SyntaxTreeDeclaration {
     Instance {
         name: String,
         binders: Vec<SyntaxBinder>,
-        type_ann: Box<SyntaxExpr>,
+        type_ann: SyntaxExpr,
         members: Vec<InstanceMember>,
         span: Span,
     },
@@ -55,7 +55,7 @@ pub enum SyntaxTreeDeclaration {
     },
     Extern {
         name: String,
-        type_ann: Box<SyntaxExpr>,
+        type_ann: SyntaxExpr,
         span: Span,
     },
     Inductive {
@@ -65,9 +65,25 @@ pub enum SyntaxTreeDeclaration {
         span: Span,
     },
     Eval {
-        expr: Box<SyntaxExpr>,
+        expr: SyntaxExpr,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefBody {
+    Expr(SyntaxExpr),
+    PatternMatch {
+        arms: Vec<PatternMatchArm>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatternMatchArm {
+    pub patterns: Vec<SyntaxPattern>,
+    pub rhs: Box<SyntaxExpr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +103,7 @@ pub struct RecordLiteralField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceMember {
     pub name: String,
-    pub value: Box<SyntaxExpr>,
+    pub value: SyntaxExpr,
     pub span: Span,
 }
 
@@ -95,8 +111,31 @@ pub struct InstanceMember {
 pub struct InductiveConstructor {
     pub name: String,
     pub binders: Vec<SyntaxBinder>,
-    pub type_ann: Option<Box<SyntaxExpr>>,
+    pub type_ann: Option<SyntaxExpr>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxPattern {
+    Var(String, Span),
+    Constructor {
+        namespace: Vec<String>,
+        name: String,
+        args: Vec<SyntaxPattern>,
+        span: Span,
+    },
+    Lit(Literal, Span),
+    Wildcard(Span),
+    Tuple {
+        elements: Vec<SyntaxPattern>,
+        span: Span,
+    },
+    As {
+        name: String,
+        pattern: Box<SyntaxPattern>,
+        span: Span,
+    },
+    Or(Vec<SyntaxPattern>, Span),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,17 +220,9 @@ pub enum SyntaxExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchArm {
-    pub patterns: Vec<Pattern>,
+    pub patterns: Vec<SyntaxPattern>,
     pub rhs: Box<SyntaxExpr>,
     pub span: Span,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Pattern {
-    Var(String, Span),
-    Constructor(Vec<String>, String, Vec<Pattern>, Span),
-    Lit(Literal, Span),
-    Wildcard(Span),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +262,70 @@ impl Spanned for SyntaxBinder {
             SyntaxBinder::Explicit(span, ..) => *span,
             SyntaxBinder::Implicit(span, ..) => *span,
             SyntaxBinder::Instance(span, ..) => *span,
+        }
+    }
+}
+
+impl Spanned for SyntaxPattern {
+    fn span(&self) -> Span {
+        match self {
+            SyntaxPattern::Var(_, span) => *span,
+            SyntaxPattern::Constructor { span, .. } => *span,
+            SyntaxPattern::Lit(_, span) => *span,
+            SyntaxPattern::Wildcard(span) => *span,
+            SyntaxPattern::Tuple { span, .. } => *span,
+            SyntaxPattern::As { span, .. } => *span,
+            SyntaxPattern::Or(_, span) => *span,
+        }
+    }
+}
+
+impl Spanned for SyntaxTreeDeclaration {
+    fn span(&self) -> Span {
+        match self {
+            SyntaxTreeDeclaration::Def { span, .. } => *span,
+            SyntaxTreeDeclaration::Class { span, .. } => *span,
+            SyntaxTreeDeclaration::Instance { span, .. } => *span,
+            SyntaxTreeDeclaration::Record { span, .. } => *span,
+            SyntaxTreeDeclaration::Extern { span, .. } => *span,
+            SyntaxTreeDeclaration::Inductive { span, .. } => *span,
+            SyntaxTreeDeclaration::Eval { span, .. } => *span,
+        }
+    }
+}
+
+impl Spanned for DefBody {
+    fn span(&self) -> Span {
+        match self {
+            DefBody::Expr(expr) => expr.span(),
+            DefBody::PatternMatch { span, .. } => *span,
+        }
+    }
+}
+
+impl Spanned for PatternMatchArm {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl<T: Spanned> Spanned for Vec<T> {
+    fn span(&self) -> Span {
+        if self.is_empty() {
+            Span {
+                file: 0,
+                start: 0,
+                end: 0,
+            }
+        } else {
+            let file_id = self[0].span().file;
+            let (min_start, max_end) =
+                self.iter()
+                    .fold((usize::MAX, 0), |(min_start, max_end), item| {
+                        let span = item.span();
+                        (min_start.min(span.start), max_end.max(span.end))
+                    });
+            Span::new(file_id, min_start, max_end - min_start)
         }
     }
 }
