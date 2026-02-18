@@ -51,7 +51,10 @@ impl Display for ElabError {
             }
             ElabErrorKind::NotInductive(name) => {
                 write!(f, "'{}' is not an inductive type", name)
-            }
+            },
+            ElabErrorKind::NotAConstructorType(term) => {
+                write!(f, "not a constructor type: '{}'", term)
+            },
         }
     }
 }
@@ -71,6 +74,7 @@ pub enum ElabErrorKind {
     TypeExpected(crate::spine::Term),
     NonExhaustiveMatch(Option<crate::spine::Term>),
     NotInductive(QualifiedName),
+    NotAConstructorType(crate::spine::Term),
 }
 
 impl miette::StdError for ElabError {}

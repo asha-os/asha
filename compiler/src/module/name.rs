@@ -54,8 +54,8 @@ impl IntrinsicName {
         match self {
             IntrinsicName::Nat => "Nat",
             IntrinsicName::Bool => "Bool",
-            IntrinsicName::True => "True",
-            IntrinsicName::False => "False",
+            IntrinsicName::True => "true",
+            IntrinsicName::False => "false",
             IntrinsicName::Str => "Str",
             IntrinsicName::Fin => "Fin",
             IntrinsicName::Array => "Array",

@@ -43,6 +43,7 @@ use crate::{
     elaboration::{
         ctx::{LocalContext, MetavarContext},
         err::{ElabError, ElabErrorKind},
+        patterns::{MatchProblem, Pattern, PatternRow, Scrutinee},
         reduce::head_const,
     },
     module::{
@@ -56,7 +57,7 @@ use crate::{
         Span, Spanned,
         tree::{
             DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxBinder,
-            SyntaxExpr, SyntaxTree, SyntaxTreeDeclaration,
+            SyntaxExpr, SyntaxPattern, SyntaxTree, SyntaxTreeDeclaration,
         },
     },
 };
@@ -196,8 +197,13 @@ impl Environment {
         root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
         root_namespace.decls.insert("IO".into(), PRIM_IO);
         root_namespace.decls.insert("Bool".into(), PRIM_BOOL);
-        root_namespace.decls.insert("True".into(), PRIM_TRUE);
-        root_namespace.decls.insert("False".into(), PRIM_FALSE);
+        root_namespace.children.insert(
+            "Bool".into(),
+            Namespace {
+                decls: [("true".into(), PRIM_TRUE), ("false".into(), PRIM_FALSE)].into(),
+                children: BTreeMap::new(),
+            },
+        );
         root_namespace.children.insert(
             "Add".into(),
             Namespace {
@@ -317,6 +323,7 @@ impl ElabState {
     pub fn pre_loaded(module: ModuleId) -> Self {
         let mut state = Self::new(module);
         state.env = Environment::pre_loaded(state.env.module_id.clone());
+        state.open_namespaces.push(alloc::vec!["Bool".into()]);
         state
     }
 
@@ -485,10 +492,13 @@ impl ElabState {
                 let scrutinees = scrutinee_types
                     .iter()
                     .enumerate()
-                    .map(|(i, (_, ty))| (Term::BVar(n - 1 - i), ty.clone()))
+                    .map(|(i, (_, ty))| Scrutinee {
+                        term: Term::BVar(n - 1 - i),
+                        type_: ty.clone(),
+                    })
                     .collect::<Vec<_>>();
                 let body = self.elaborate_pattern_match(
-                    &scrutinees,
+                    scrutinees,
                     arms,
                     Some(pattern_return_type),
                     *span,
@@ -1124,13 +1134,105 @@ impl ElabState {
     /// Placeholder
     fn elaborate_pattern_match(
         &mut self,
-        scrutinees: &[(Term, Term)],
+        scrutinees: Vec<Scrutinee>,
         arms: &[PatternMatchArm],
         expected_type: Option<Term>,
         span: Span,
     ) -> Term {
-        // TODO
-        Term::Unit
+        let rows = arms
+            .iter()
+            .map(|arm| {
+                let patterns = arm
+                    .patterns
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let scrutinee_type = scrutinees[i].type_.clone();
+                        self.elaborate_pattern(p, &scrutinee_type)
+                    })
+                    .collect();
+                let rhs = self.elaborate_term(&arm.rhs, expected_type.as_ref());
+                PatternRow::new(patterns, rhs)
+            })
+            .collect::<Vec<_>>();
+        let problem = MatchProblem::new(scrutinees, rows);
+
+        patterns::compile(problem)
+    }
+
+    fn elaborate_pattern(&mut self, pattern: &SyntaxPattern, expected_type: &Term) -> Pattern {
+        match pattern {
+            SyntaxPattern::Var(name, _) => {
+                let (fvar, _type) = self.fresh_fvar(name.clone(), expected_type.clone());
+                Pattern::Var(Some(fvar))
+            }
+            SyntaxPattern::Constructor {
+                namespace,
+                name,
+                args,
+                span,
+            } => {
+                let resolved = self.resolve_name(namespace, name);
+                let Some((ctor_qname, ctor_type)) = resolved else {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::UndefinedConstructor(name.clone()),
+                        *span,
+                    ));
+                    return Pattern::Var(None);
+                };
+                let ctor_qname = ctor_qname.clone();
+                let ctor_type = ctor_type.clone();
+
+                let (_ctor_term, ctor_type) =
+                    self.insert_implicit_args(Term::Const(ctor_qname.clone()), ctor_type);
+
+                let mut current_type = reduce::whnf(self, &ctor_type);
+                let mut arg_types = Vec::new();
+                for _ in args.iter() {
+                    match current_type {
+                        Term::Pi(_, param_ty, body_ty) => {
+                            arg_types.push(*param_ty);
+                            current_type = reduce::whnf(self, &body_ty);
+                        }
+                        _ => {
+                            self.errors.push(ElabError::new(
+                                ElabErrorKind::NotAConstructorType(current_type.clone()),
+                                *span,
+                            ));
+                            break;
+                        }
+                    }
+                }
+                if !self.unify(&current_type, expected_type) {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::TypeMismatch {
+                            expected: expected_type.clone(),
+                            found: current_type,
+                        },
+                        *span,
+                    ));
+                }
+
+                let elaborated_args = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| {
+                        if i < arg_types.len() {
+                            self.elaborate_pattern(arg, &arg_types[i])
+                        } else {
+                            Pattern::Var(None)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                Pattern::Constructor {
+                    ctor: ctor_qname,
+                    fields: elaborated_args,
+                    type_: ctor_type,
+                }
+            }
+            SyntaxPattern::Wildcard(_) => Pattern::Var(None),
+            u => todo!("unsupported pattern: {:?}", u),
+        }
     }
 }
 
