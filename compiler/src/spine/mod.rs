@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String};
+use alloc::{boxed::Box, string::String, vec::Vec};
 
 use crate::module::{name::QualifiedName, unique::Unique};
 
@@ -63,4 +63,24 @@ impl Level {
         }
         level
     }
+}
+
+pub fn uncurry(term: Term) -> (Term, Vec<(BinderInfo, Term)>) {
+    let mut args = Vec::new();
+    let mut current = term;
+    loop {
+        match current {
+            Term::App(f, a) => {
+                args.push((BinderInfo::Explicit, *a));
+                current = *f;
+            }
+            Term::Pi(info, param, body) => {
+                args.push((info, *param));
+                current = *body;
+            }
+            _ => break,
+        }
+    }
+    args.reverse();
+    (current, args)
 }

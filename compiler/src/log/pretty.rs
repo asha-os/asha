@@ -7,6 +7,7 @@ use alloc::{
 
 use crate::{
     elaboration::{Declaration, Environment},
+    module::name::QualifiedName,
     spine::{BinderInfo, Term},
 };
 
@@ -83,5 +84,11 @@ fn binder_surrounding(binder_info: &BinderInfo, str: String) -> String {
         BinderInfo::Implicit => format!("{{{}}}", str),
         BinderInfo::InstanceImplicit => format!("[{}]", str),
         BinderInfo::StrictImplicit => format!("{{{{{}}}}}", str),
+    }
+}
+
+impl Display for QualifiedName {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.display().unwrap_or("<unknown>"))
     }
 }

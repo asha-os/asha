@@ -25,6 +25,7 @@
 
 pub mod ctx;
 pub mod err;
+pub mod patterns;
 pub mod reduce;
 pub mod subst;
 pub mod unify;
@@ -50,11 +51,12 @@ use crate::{
         prim::*,
         unique::{Unique, UniqueGen},
     },
-    spine::{BinderInfo, Level, Literal, Term},
+    spine::{BinderInfo, Level, Literal, Term, uncurry},
     syntax::{
         Span, Spanned,
         tree::{
-            DefBody, InductiveConstructor, InfixOp, RecordField, SyntaxBinder, SyntaxExpr, SyntaxTree, SyntaxTreeDeclaration
+            DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxBinder,
+            SyntaxExpr, SyntaxTree, SyntaxTreeDeclaration,
         },
     },
 };
@@ -469,22 +471,40 @@ impl ElabState {
         body: &DefBody,
         span: Span,
     ) {
-        let body = match body {
-            DefBody::Expr(e) => e,
-            DefBody::PatternMatch { .. } => {
-                self.errors.push(ElabError::new(
-                    ElabErrorKind::UnsupportedSyntax(return_type.clone()),
-                    span,
-                ));
-                return;
-            }
-        };
         let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
         let elaborated_return_type = self.elaborate_term(return_type, None);
-        let elaborated_body = self.elaborate_term(body, Some(&elaborated_return_type));
+        let elaborated_body = match body {
+            DefBody::Expr(body) => self.elaborate_term(body, Some(&elaborated_return_type)),
+            DefBody::PatternMatch { arms, span } => {
+                let (pattern_return_type, scrutinee_types) =
+                    uncurry(elaborated_return_type.clone());
+                let n = scrutinee_types.len();
+                let scrutinees = scrutinee_types
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, ty))| (Term::BVar(n - 1 - i), ty.clone()))
+                    .collect::<Vec<_>>();
+                let body = self.elaborate_pattern_match(
+                    &scrutinees,
+                    arms,
+                    Some(pattern_return_type),
+                    *span,
+                );
+
+                let mut lambda = body;
+                for (_, scrutinee_type) in scrutinee_types.iter().rev() {
+                    lambda = Term::Lam(
+                        BinderInfo::Explicit,
+                        Box::new(scrutinee_type.clone()),
+                        Box::new(lambda),
+                    );
+                }
+                lambda
+            }
+        };
 
         let pi_type = Self::abstract_binders(&binder_fvars, elaborated_return_type);
         let mut value = elaborated_body;
@@ -553,12 +573,11 @@ impl ElabState {
             }
             SyntaxExpr::Constructor { name, .. } if name == "Type" => (
                 Term::Sort(Level::type0()),
-                Term::Sort(Level::Succ(Box::new(Level::type0())))
+                Term::Sort(Level::Succ(Box::new(Level::type0()))),
             ),
-            SyntaxExpr::Constructor { name, .. } if name == "Prop" => (
-                Term::Sort(Level::Zero),
-                Term::Sort(Level::type0()),
-            ),
+            SyntaxExpr::Constructor { name, .. } if name == "Prop" => {
+                (Term::Sort(Level::Zero), Term::Sort(Level::type0()))
+            }
             SyntaxExpr::Constructor {
                 namespace, name, ..
             } => {
@@ -1098,6 +1117,20 @@ impl ElabState {
         );
 
         self.lctx = saved_lctx;
+    }
+
+    /// Elaborates a pattern match expression.
+    ///
+    /// Placeholder
+    fn elaborate_pattern_match(
+        &mut self,
+        scrutinees: &[(Term, Term)],
+        arms: &[PatternMatchArm],
+        expected_type: Option<Term>,
+        span: Span,
+    ) -> Term {
+        // TODO
+        Term::Unit
     }
 }
 

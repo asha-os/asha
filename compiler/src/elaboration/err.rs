@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use crate::syntax::Span;
+use crate::{module::name::QualifiedName, syntax::Span};
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -42,6 +42,16 @@ impl Display for ElabError {
             ElabErrorKind::TypeExpected(term) => {
                 write!(f, "type expected, got '{}'", term)
             }
+            ElabErrorKind::NonExhaustiveMatch(term) => {
+                if let Some(term) = term {
+                    write!(f, "non-exhaustive match, missing case '{}'", term)
+                } else {
+                    write!(f, "non-exhaustive match")
+                }
+            }
+            ElabErrorKind::NotInductive(name) => {
+                write!(f, "'{}' is not an inductive type", name)
+            }
         }
     }
 }
@@ -59,6 +69,8 @@ pub enum ElabErrorKind {
     NotAFunction(crate::spine::Term),
     CannotProject(crate::spine::Term, String),
     TypeExpected(crate::spine::Term),
+    NonExhaustiveMatch(Option<crate::spine::Term>),
+    NotInductive(QualifiedName),
 }
 
 impl miette::StdError for ElabError {}
