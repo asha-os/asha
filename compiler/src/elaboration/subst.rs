@@ -172,3 +172,43 @@ fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
         ),
     }
 }
+
+/// Replaces all occurrences of `fvar` in `term` with `replacement`.
+pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
+    match term {
+        Term::FVar(u) if *u == *fvar => replacement.clone(),
+
+        Term::Unit
+        | Term::BVar(_)
+        | Term::Const(_)
+        | Term::FVar(_)
+        | Term::MVar(_)
+        | Term::Lit(_)
+        | Term::Sort(_) => term.clone(),
+
+        Term::App(f, a) => Term::App(
+            Box::new(replace_fvar(f, fvar, replacement)),
+            Box::new(replace_fvar(a, fvar, replacement)),
+        ),
+        Term::Lam(info, ty, body) => Term::Lam(
+            info.clone(),
+            Box::new(replace_fvar(ty, fvar, replacement)),
+            Box::new(replace_fvar(body, fvar, replacement)),
+        ),
+        Term::Pi(info, ty, body) => Term::Pi(
+            info.clone(),
+            Box::new(replace_fvar(ty, fvar, replacement)),
+            Box::new(replace_fvar(body, fvar, replacement)),
+        ),
+        Term::Sigma(info, ty, body) => Term::Sigma(
+            info.clone(),
+            Box::new(replace_fvar(ty, fvar, replacement)),
+            Box::new(replace_fvar(body, fvar, replacement)),
+        ),
+        Term::Let(ty, val, body) => Term::Let(
+            Box::new(replace_fvar(ty, fvar, replacement)),
+            Box::new(replace_fvar(val, fvar, replacement)),
+            Box::new(replace_fvar(body, fvar, replacement)),
+        ),
+    }
+}

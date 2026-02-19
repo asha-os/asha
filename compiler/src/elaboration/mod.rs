@@ -25,6 +25,7 @@
 
 pub mod ctx;
 pub mod err;
+pub mod metadata;
 pub mod patterns;
 pub mod reduce;
 pub mod subst;
@@ -43,6 +44,7 @@ use crate::{
     elaboration::{
         ctx::{LocalContext, MetavarContext},
         err::{ElabError, ElabErrorKind},
+        metadata::InductiveMetadata,
         patterns::{MatchProblem, Pattern, PatternRow, Scrutinee},
         reduce::head_const,
     },
@@ -123,6 +125,8 @@ pub struct Environment {
     pub decls: BTreeMap<QualifiedName, Declaration>,
     /// The root of the namespace tree for name resolution.
     pub root_namespace: Namespace,
+    /// Metadata for inductive types. Used during pattern match elaboration.
+    pub inductives: BTreeMap<QualifiedName, InductiveMetadata>,
 }
 
 impl Environment {
@@ -132,6 +136,7 @@ impl Environment {
     pub fn pre_loaded(module_id: ModuleId) -> Self {
         // todo: review
         let mut externals = BTreeMap::new();
+        let inductives = BTreeMap::new();
         externals.insert(PRIM_NAT, Term::Sort(Level::type0()));
         externals.insert(PRIM_STRING, Term::Sort(Level::type0()));
         externals.insert(PRIM_BOOL, Term::Sort(Level::type0()));
@@ -223,6 +228,7 @@ impl Environment {
             externals,
             decls: BTreeMap::new(),
             root_namespace,
+            inductives,
         }
     }
 
@@ -239,6 +245,11 @@ impl Environment {
             .get(qname)
             .map(|decl| (decl.name(), decl.type_()))
             .or_else(|| self.externals.get_key_value(qname).map(|(n, t)| (n, t)))
+    }
+
+    /// Looks up an inductive type's metadata by its qualified name.
+    pub fn lookup_inductive(&self, qname: &QualifiedName) -> Option<&InductiveMetadata> {
+        self.inductives.get(qname)
     }
 }
 
@@ -309,6 +320,7 @@ impl ElabState {
                 externals: BTreeMap::new(),
                 decls: BTreeMap::new(),
                 root_namespace: Namespace::new(),
+                inductives: BTreeMap::new(),
             },
             gen_: UniqueGen::new(module),
             mctx: MetavarContext::new(),
@@ -497,12 +509,8 @@ impl ElabState {
                         type_: ty.clone(),
                     })
                     .collect::<Vec<_>>();
-                let body = self.elaborate_pattern_match(
-                    scrutinees,
-                    arms,
-                    Some(pattern_return_type),
-                    *span,
-                );
+                let body =
+                    self.elaborate_pattern_match(scrutinees, arms, pattern_return_type, *span);
 
                 let mut lambda = body;
                 for (_, scrutinee_type) in scrutinee_types.iter().rev() {
@@ -996,7 +1004,26 @@ impl ElabState {
 
         self.register_in_namespace(&name.display().unwrap(), name.clone());
         let mut namespace = Namespace::new();
-        self.elaborate_inductive_constructors(&mut namespace, &name, &binder_fvars, constructors);
+        let (constructor_names, constructor_types) = self
+            .elaborate_inductive_constructors(&mut namespace, &name, &binder_fvars, constructors)
+            .into_iter()
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+        let match_fn_name = QualifiedName::User(self.gen_.fresh("match".into()));
+        let match_fn_type = self.generate_match_fn_type(
+            &name,
+            &binder_fvars,
+            &constructor_names,
+            &constructor_types,
+        );
+        self.env.decls.insert(
+            match_fn_name.clone(),
+            Declaration::Constructor {
+                name: match_fn_name.clone(),
+                type_: match_fn_type,
+                span,
+            },
+        );
+
         if let Some(existing) = self
             .env
             .root_namespace
@@ -1009,8 +1036,17 @@ impl ElabState {
             self.env
                 .root_namespace
                 .children
-                .insert(name.display().unwrap().to_string(), namespace);
+                .insert((&name).display().unwrap().to_string(), namespace);
         }
+        let metadata = InductiveMetadata {
+            name: name.clone(),
+            num_params: binder_fvars.len(),
+            num_indices: 0, // todo
+            constructors: constructor_names,
+            match_fn: match_fn_name,
+            is_recursive: false, // todo
+        };
+        self.env.inductives.insert(name.clone(), metadata);
 
         self.lctx = saved_lctx;
     }
@@ -1026,7 +1062,8 @@ impl ElabState {
         inductive_name: &QualifiedName,
         binders: &[(Unique, BinderInfo, Term)],
         constructors: &[InductiveConstructor],
-    ) {
+    ) -> Vec<(QualifiedName, Term)> {
+        let mut constructor_data = Vec::new();
         for constructor in constructors {
             let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.to_string()));
             let saved_lctx = self.lctx.clone();
@@ -1048,16 +1085,18 @@ impl ElabState {
                 ctor_name.clone(),
                 Declaration::Constructor {
                     name: ctor_name.clone(),
-                    type_: constructor_type,
+                    type_: constructor_type.clone(),
                     span: constructor.span,
                 },
             );
 
             inductive_namespace
                 .decls
-                .insert(constructor.name.clone(), ctor_name);
+                .insert(constructor.name.clone(), ctor_name.clone());
             self.lctx = saved_lctx;
+            constructor_data.push((ctor_name, constructor_type));
         }
+        return constructor_data;
     }
 
     /// Elaborates a typeclass declaration.
@@ -1138,7 +1177,7 @@ impl ElabState {
         &mut self,
         scrutinees: Vec<Scrutinee>,
         arms: &[PatternMatchArm],
-        expected_type: Option<Term>,
+        expected_type: Term,
         span: Span,
     ) -> Term {
         let rows = arms
@@ -1155,13 +1194,19 @@ impl ElabState {
                             .map(|scrutinee| self.elaborate_pattern(p, &scrutinee.type_))
                     })
                     .collect();
-                let rhs = self.elaborate_term(&arm.rhs, expected_type.as_ref());
+                let rhs = self.elaborate_term(&arm.rhs, Some(&expected_type));
                 PatternRow::new(patterns, rhs)
             })
             .collect::<Vec<_>>();
-        let problem = MatchProblem::new(scrutinees, rows);
+        let problem = MatchProblem::new(scrutinees, rows, expected_type);
 
-        patterns::compile(problem)
+        match patterns::compile(&self.env, &mut self.gen_, problem, span) {
+            Ok(term) => term,
+            Err(err) => {
+                self.errors.push(err);
+                self.erroneous_term()
+            }
+        }
     }
 
     fn elaborate_pattern(&mut self, pattern: &SyntaxPattern, expected_type: &Term) -> Pattern {
@@ -1242,6 +1287,102 @@ impl ElabState {
             SyntaxPattern::Wildcard(_) => Pattern::Var(None),
             u => todo!("unsupported pattern: {:?}", u),
         }
+    }
+
+    /// Generates the type of the match/elimination function for an inductive type.
+    fn generate_match_fn_type(
+        &mut self,
+        inductive_name: &QualifiedName,
+        binder_fvars: &[(Unique, BinderInfo, Term)],
+        constructor_names: &[QualifiedName],
+        constructors_types: &[Term],
+    ) -> Term {
+        let motive_type = Term::Pi(
+            BinderInfo::Explicit,
+            Box::new(Term::Const(inductive_name.clone())),
+            Box::new(Term::Sort(Level::type0())),
+        );
+        let (motive_fvar, _) = self.fresh_fvar("_motive".into(), motive_type.clone());
+        let motive = Term::FVar(motive_fvar.clone());
+
+        let (scrutinee_fvar, _) =
+            self.fresh_fvar("_scrut".into(), Term::Const(inductive_name.clone()));
+
+        let mut branch_types = Vec::new();
+        for (ctor_name, ctor_type) in constructor_names.iter().zip(constructors_types.iter()) {
+            let branch_type =
+                Self::build_branch_type(ctor_name, ctor_type, binder_fvars.len(), &motive);
+            branch_types.push(branch_type);
+        }
+
+        let mut result = Term::App(
+            Box::new(motive.clone()),
+            Box::new(Term::FVar(scrutinee_fvar.clone())),
+        );
+
+        for branch_type in branch_types.iter().rev() {
+            result = Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(branch_type.clone()),
+                Box::new(result),
+            );
+        }
+
+        result = subst::abstract_fvar(&result, scrutinee_fvar);
+        result = Term::Pi(
+            BinderInfo::Explicit,
+            Box::new(Term::Const(inductive_name.clone())),
+            Box::new(result),
+        );
+
+        result = subst::abstract_fvar(&result, motive_fvar);
+        result = Term::Pi(
+            BinderInfo::Explicit,
+            Box::new(motive_type),
+            Box::new(result),
+        );
+
+        for (_, info, ty) in binder_fvars.iter().rev() {
+            result = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(result));
+        }
+
+        result
+    }
+
+    /// Builds the branch type for a single constructor in the match function.
+    fn build_branch_type(
+        ctor_name: &QualifiedName,
+        ctor_type: &Term,
+        num_params: usize,
+        motive: &Term,
+    ) -> Term {
+        // Skip inductive parameters
+        let mut current = ctor_type.clone();
+        for _ in 0..num_params {
+            if let Term::Pi(_, _, body) = current {
+                current = *body;
+            }
+        }
+
+        let mut field_binders = Vec::new();
+        while let Term::Pi(info, param_ty, body) = current {
+            field_binders.push((info, *param_ty));
+            current = *body;
+        }
+
+        let num_fields = field_binders.len();
+
+        let mut ctor_app = Term::Const(ctor_name.clone());
+        for i in 0..num_fields {
+            ctor_app = Term::App(Box::new(ctor_app), Box::new(Term::BVar(num_fields - 1 - i)));
+        }
+
+        let mut result = Term::App(Box::new(motive.clone()), Box::new(ctor_app));
+
+        for (info, field_type) in field_binders.iter().rev() {
+            result = Term::Pi(info.clone(), Box::new(field_type.clone()), Box::new(result));
+        }
+        result
     }
 }
 

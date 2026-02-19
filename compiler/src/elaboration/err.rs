@@ -1,6 +1,9 @@
 use core::fmt::Display;
 
-use crate::{module::name::QualifiedName, syntax::Span};
+use crate::{
+    spine::Term,
+    syntax::{Span, tree::SyntaxExpr},
+};
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -49,8 +52,8 @@ impl Display for ElabError {
                     write!(f, "non-exhaustive match")
                 }
             }
-            ElabErrorKind::NotInductive(name) => {
-                write!(f, "'{}' is not an inductive type", name)
+            ElabErrorKind::NotInductive(term) => {
+                write!(f, "not an inductive type: '{}'", term)
             }
             ElabErrorKind::NotAConstructorType(term) => {
                 write!(f, "not a constructor type: '{}'", term)
@@ -64,17 +67,14 @@ pub enum ElabErrorKind {
     ExpectedRoot,
     UndefinedVariable(String),
     UndefinedConstructor(String),
-    TypeMismatch {
-        expected: crate::spine::Term,
-        found: crate::spine::Term,
-    },
-    UnsupportedSyntax(crate::syntax::tree::SyntaxExpr),
-    NotAFunction(crate::spine::Term),
-    CannotProject(crate::spine::Term, String),
-    TypeExpected(crate::spine::Term),
-    NonExhaustiveMatch(Option<crate::spine::Term>),
-    NotInductive(QualifiedName),
-    NotAConstructorType(crate::spine::Term),
+    TypeMismatch { expected: Term, found: Term },
+    UnsupportedSyntax(SyntaxExpr),
+    NotAFunction(Term),
+    CannotProject(Term, String),
+    TypeExpected(Term),
+    NonExhaustiveMatch(Option<Term>),
+    NotInductive(Term),
+    NotAConstructorType(Term),
 }
 
 impl miette::StdError for ElabError {}
