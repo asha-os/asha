@@ -1129,9 +1129,11 @@ impl ElabState {
         self.lctx = saved_lctx;
     }
 
-    /// Elaborates a pattern match expression.
+    /// Elaborates a pattern match expression to a core term.
     ///
-    /// Placeholder
+    /// 1. Elaborates each pattern in each arm against the corresponding scrutinee type.
+    /// 2. Elaborates the right-hand side of each arm against the expected return type
+    /// 3. Compiles the resulting pattern matrix into a core term via `patterns::compile`.
     fn elaborate_pattern_match(
         &mut self,
         scrutinees: Vec<Scrutinee>,
@@ -1146,9 +1148,11 @@ impl ElabState {
                     .patterns
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| {
-                        let scrutinee_type = scrutinees[i].type_.clone();
-                        self.elaborate_pattern(p, &scrutinee_type)
+                    .filter_map(|(i, p)| {
+                        // Associates nth pattern's type to nth scrutinee's type
+                        scrutinees
+                            .get(i)
+                            .map(|scrutinee| self.elaborate_pattern(p, &scrutinee.type_))
                     })
                     .collect();
                 let rhs = self.elaborate_term(&arm.rhs, expected_type.as_ref());
@@ -1163,6 +1167,7 @@ impl ElabState {
     fn elaborate_pattern(&mut self, pattern: &SyntaxPattern, expected_type: &Term) -> Pattern {
         match pattern {
             SyntaxPattern::Var(name, _) => {
+                // If it's a variable, we just create a free var for it
                 let (fvar, _type) = self.fresh_fvar(name.clone(), expected_type.clone());
                 Pattern::Var(Some(fvar))
             }
@@ -1172,6 +1177,7 @@ impl ElabState {
                 args,
                 span,
             } => {
+                // First we resolve the constructor that is being matched against
                 let resolved = self.resolve_name(namespace, name);
                 let Some((ctor_qname, ctor_type)) = resolved else {
                     self.errors.push(ElabError::new(
@@ -1183,11 +1189,13 @@ impl ElabState {
                 let ctor_qname = ctor_qname.clone();
                 let ctor_type = ctor_type.clone();
 
+                // Insert implicit arguments for the constructor type
                 let (_ctor_term, ctor_type) =
                     self.insert_implicit_args(Term::Const(ctor_qname.clone()), ctor_type);
 
                 let mut current_type = reduce::whnf(self, &ctor_type);
                 let mut arg_types = Vec::new();
+                // Peel off Pi types for each argument in the pattern, collecting their types
                 for _ in args.iter() {
                     match current_type {
                         Term::Pi(_, param_ty, body_ty) => {
@@ -1203,6 +1211,8 @@ impl ElabState {
                         }
                     }
                 }
+                // Unify the innermost type (which is the constructor itself after all applications)
+                // to the expected type of the pattern
                 if !self.unify(&current_type, expected_type) {
                     self.errors.push(ElabError::new(
                         ElabErrorKind::TypeMismatch {
@@ -1213,15 +1223,14 @@ impl ElabState {
                     ));
                 }
 
+                // Elaborate each pattern argument against the corresponding parameter type
                 let elaborated_args = args
                     .iter()
                     .enumerate()
-                    .map(|(i, arg)| {
-                        if i < arg_types.len() {
-                            self.elaborate_pattern(arg, &arg_types[i])
-                        } else {
-                            Pattern::Var(None)
-                        }
+                    .filter_map(|(i, arg)| {
+                        arg_types
+                            .get(i)
+                            .map(|arg_type| self.elaborate_pattern(arg, arg_type))
                     })
                     .collect::<Vec<_>>();
                 Pattern::Constructor {

@@ -7,10 +7,6 @@ def is_zero : ScottNat -> Bool
     | ScottNat::zero => true
     | ScottNat::succ _ => false
 
-def funner (first : ScottNat) : ScottNat -> Bool
-    | Bool::true => true
-    | ScottNat::succ _ => false
-
 def funny (first : ScottNat) : ScottNat -> Bool
     | ScottNat::zero => true
     | ScottNat::succ _ => false

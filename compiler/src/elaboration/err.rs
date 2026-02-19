@@ -51,10 +51,10 @@ impl Display for ElabError {
             }
             ElabErrorKind::NotInductive(name) => {
                 write!(f, "'{}' is not an inductive type", name)
-            },
+            }
             ElabErrorKind::NotAConstructorType(term) => {
                 write!(f, "not a constructor type: '{}'", term)
-            },
+            }
         }
     }
 }
