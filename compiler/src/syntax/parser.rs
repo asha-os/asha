@@ -269,43 +269,31 @@ fn pattern_parser<'a>(
                 },
             });
 
+        let var = just_token(TokenKind::LowerIdentifier)
+            .map(|t| SyntaxPattern::Var(lexeme_to_string(t.lexeme), t.span));
+
         let constructor = qualified_name_parser()
+            .filter(|qn| qn.is_upper || !qn.namespace.is_empty())
             .then(pattern.clone().repeated().collect::<Vec<_>>())
             .map(|(qn, args)| {
-                if qn.is_upper || !qn.namespace.is_empty() {
-                    let span = if args.is_empty() {
-                        qn.span
-                    } else {
-                        Span {
-                            file: qn.span.file,
-                            start: qn.span.start,
-                            end: args.last().unwrap().span().end,
-                        }
-                    };
-                    SyntaxPattern::Constructor {
-                        namespace: qn.namespace,
-                        name: qn.name,
-                        args,
-                        span,
-                    }
-                } else if args.is_empty() {
-                    SyntaxPattern::Var(qn.name, qn.span)
+                let span = if args.is_empty() {
+                    qn.span
                 } else {
-                    let span = Span {
+                    Span {
                         file: qn.span.file,
                         start: qn.span.start,
                         end: args.last().unwrap().span().end,
-                    };
-                    SyntaxPattern::Constructor {
-                        namespace: qn.namespace,
-                        name: qn.name,
-                        args,
-                        span,
                     }
+                };
+                SyntaxPattern::Constructor {
+                    namespace: qn.namespace,
+                    name: qn.name,
+                    args,
+                    span,
                 }
             });
 
-        choice((wildcard, tuple_or_grouped, constructor))
+        choice((wildcard, tuple_or_grouped, constructor, var))
     })
 }
 

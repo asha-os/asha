@@ -3,6 +3,11 @@ inductive ScottNat {
     succ : ScottNat -> ScottNat
 }
 
+inductive ScottList (a : Type) {
+    nil : ScottList a,
+    cons : a -> ScottList a -> ScottList a
+}
+
 def is_zero : ScottNat -> Bool
     | ScottNat::zero => true
     | ScottNat::succ _ => false
@@ -10,3 +15,11 @@ def is_zero : ScottNat -> Bool
 def funny (first : ScottNat) : ScottNat -> Bool
     | ScottNat::zero => true
     | ScottNat::succ _ => false
+
+def is_nil {a : Type} : ScottList a -> Bool
+    | ScottList::nil => true
+    | ScottList::cons _ _ => false
+
+def map {a : Type} {b : Type} (f : a -> b) : ScottList a -> ScottList b
+    | ScottList::nil => ScottList::nil
+    | ScottList::cons x xs => ScottList::cons (f x) ScottList::nil

@@ -76,7 +76,6 @@ pub fn compile(
     if problem.scrutinees.is_empty() {
         return Ok(problem.rows[0].rhs.clone());
     }
-
     let col = pick_column(&problem);
     // If the column is all variables, we can eliminate it and compile the smaller problem.
     if is_all_variables(&problem, col) {
@@ -93,10 +92,12 @@ pub fn compile(
     let num_params = inductive.num_params;
     let ctors = inductive.constructors.clone();
 
+    let type_args = extract_type_args(type_, num_params);
+
     let mut branches = Vec::new();
     for ctor_name in &ctors {
         let ctor_type = env.lookup(ctor_name).unwrap().type_().clone();
-        let field_types = extract_field_types(&ctor_type, num_params);
+        let field_types = extract_field_types(&ctor_type, num_params, &type_args);
         let arity = field_types.len();
 
         let (sub_problem, field_fvars) =
@@ -143,13 +144,31 @@ pub fn compile(
     Ok(result)
 }
 
-/// Extracts the field types from a constructor's Pi type, skipping the inductive's parameters.
-fn extract_field_types(ctor_type: &Term, num_params: usize) -> Vec<Term> {
+/// Extracts the type arguments applied to an inductive .
+fn extract_type_args(scrutinee_type: &Term, num_params: usize) -> Vec<Term> {
+    let mut args = Vec::new();
+    let mut current = scrutinee_type.clone();
+    while let Term::App(f, a) = current {
+        args.push(*a);
+        current = *f;
+    }
+    args.reverse();
+    args.truncate(num_params);
+    args
+}
+
+/// Extracts the field types from a constructor's Pi type, skipping the inductive's parameters
+/// and instantiating de Bruijn indices with the actual type arguments from the scrutinee.
+fn extract_field_types(ctor_type: &Term, num_params: usize, type_args: &[Term]) -> Vec<Term> {
     let mut current = ctor_type.clone();
     // Skip inductive parameters
-    for _ in 0..num_params {
+    for i in 0..num_params {
         if let Term::Pi(_, _, body) = current {
-            current = *body;
+            current = if i < type_args.len() {
+                subst::instantiate(&body, &type_args[i])
+            } else {
+                *body
+            };
         }
     }
     let mut field_types = Vec::new();

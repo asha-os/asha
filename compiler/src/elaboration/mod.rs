@@ -550,6 +550,12 @@ impl ElabState {
     fn elaborate_term(&mut self, syntax: &SyntaxExpr, expected_type: Option<&Term>) -> Term {
         let (term, inferred_type) = self.elaborate_term_inner(syntax);
 
+        let (term, inferred_type) = if expected_type.is_some() {
+            self.insert_implicit_args(term, inferred_type)
+        } else {
+            (term, inferred_type)
+        };
+
         if let Some(expected) = expected_type {
             if !self.unify(&inferred_type, expected) {
                 self.errors.push(ElabError::new(
@@ -1067,7 +1073,6 @@ impl ElabState {
         for constructor in constructors {
             let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.to_string()));
             let saved_lctx = self.lctx.clone();
-
             let ctor_binder_fvars = self.elaborate_binders(&constructor.binders);
 
             let base_type = if let Some(type_ann) = &constructor.type_ann {
@@ -1076,8 +1081,13 @@ impl ElabState {
                 Term::Const(inductive_name.clone())
             };
 
+            // Inductive parameters are always implicit in constructor types
+            let implicit_binders: Vec<_> = binders
+                .iter()
+                .map(|(u, _, ty)| (u.clone(), BinderInfo::Implicit, ty.clone()))
+                .collect();
             let constructor_type = Self::abstract_binders(
-                binders,
+                &implicit_binders,
                 Self::abstract_binders(&ctor_binder_fvars, base_type),
             );
 

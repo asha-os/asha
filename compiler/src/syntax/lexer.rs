@@ -90,7 +90,7 @@ impl<'a> Iterator for Lexer<'a> {
                     span: self.cursor.span_from(start),
                 }))
             }
-            c if is_ident_start(c) && c != 'λ' => {
+            c if is_ident_start(c) && c != 'λ' && c != '_' => {
                 let is_upper = c.is_uppercase();
                 while self.cursor.byte_offset < source.len() {
                     let remaining = &source[self.cursor.byte_offset..];

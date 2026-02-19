@@ -68,19 +68,9 @@ impl Level {
 pub fn uncurry(term: Term) -> (Term, Vec<(BinderInfo, Term)>) {
     let mut args = Vec::new();
     let mut current = term;
-    loop {
-        match current {
-            Term::App(f, a) => {
-                args.push((BinderInfo::Explicit, *a));
-                current = *f;
-            }
-            Term::Pi(info, param, body) => {
-                args.push((info, *param));
-                current = *body;
-            }
-            _ => break,
-        }
+    while let Term::Pi(info, param, body) = current {
+        args.push((info, *param));
+        current = *body;
     }
-    args.reverse();
     (current, args)
 }
