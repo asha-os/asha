@@ -928,56 +928,64 @@ impl ElabState {
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
-        let mut constructor_type = Term::Const(record_name.clone());
-        for field in fields.iter().rev() {
-            let field_name = QualifiedName::User(self.gen_.fresh(field.name.clone()));
+        self.register_inductive_type(name, &record_name, &binder_fvars, span);
+
+        let mut field_data: Vec<(String, QualifiedName, Term)> = Vec::new();
+        for field in fields {
+            let field_qname = QualifiedName::User(self.gen_.fresh(field.name.clone()));
             let field_type = self.elaborate_term(&field.type_ann, None);
-            // todo: make this a def
-            let field_def = Declaration::Constructor {
-                name: field_name.clone(),
-                type_: field_type.clone(),
-                span: field.span,
-            };
+            field_data.push((field.name.clone(), field_qname, field_type));
+        }
 
-            self.env.decls.insert(field_name.clone(), field_def);
-            child_ns.decls.insert(field.name.clone(), field_name);
-
+        let mut constructor_type = Term::Const(record_name.clone());
+        for (fvar, _, _) in &binder_fvars {
+            constructor_type = Term::App(
+                Box::new(constructor_type),
+                Box::new(Term::FVar(fvar.clone())),
+            );
+        }
+        for (_, _, field_type) in field_data.iter().rev() {
             constructor_type = Term::Pi(
                 BinderInfo::Explicit,
-                Box::new(field_type),
+                Box::new(field_type.clone()),
                 Box::new(constructor_type),
             );
         }
-
-        let pi_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
         let constructor_type = Self::abstract_binders(&binder_fvars, constructor_type);
+        let constructor = self.register_constructor("new", constructor_type, &mut child_ns, span);
 
-        self.env.decls.insert(
+        self.register_inductive(
+            name,
             record_name.clone(),
-            Declaration::Constructor {
-                name: record_name.clone(),
-                type_: pi_type,
-                span,
-            },
+            &binder_fvars,
+            alloc::vec![constructor],
+            child_ns,
+            span,
         );
-        self.register_in_namespace(name, record_name.clone());
 
-        let constructor_name = QualifiedName::User(self.gen_.fresh("new".to_string()));
-        self.env.decls.insert(
-            constructor_name.clone(),
-            Declaration::Constructor {
-                name: constructor_name.clone(),
-                type_: constructor_type,
+        let all_field_types: Vec<Term> = field_data.iter().map(|(_, _, ty)| ty.clone()).collect();
+        let match_fn = self
+            .env
+            .lookup_inductive(&record_name)
+            .unwrap()
+            .match_fn
+            .clone();
+        for (field_index, (field_display_name, field_qname, field_type)) in
+            field_data.into_iter().enumerate()
+        {
+            let field_def = self.elaborate_field_definition(
+                &field_qname,
+                &record_name,
+                &match_fn,
+                &all_field_types,
+                field_index,
+                &field_type,
+                &binder_fvars,
                 span,
-            },
-        );
-        child_ns.decls.insert("new".into(), constructor_name);
-        let parent_ns = &mut self.env.root_namespace.children;
-        if let Some(existing) = parent_ns.get_mut(name) {
-            existing.decls.extend(child_ns.decls);
-            existing.children.extend(child_ns.children);
-        } else {
-            parent_ns.insert(name.to_string(), child_ns);
+            );
+            self.env.decls.insert(field_qname.clone(), field_def);
+            let record_ns = self.env.root_namespace.children.get_mut(name).unwrap();
+            record_ns.decls.insert(field_display_name, field_qname);
         }
 
         self.lctx = saved_lctx;
@@ -1014,37 +1022,66 @@ impl ElabState {
     /// Creates the inductive type constant (typed as `Type` after abstracting binders),
     /// then elaborates each constructor via [`Self::elaborate_inductive_constructors`],
     /// placing them in a child namespace `InductiveName::CtorName`.
-    fn elaborate_inductive(
+    /// Registers the type declaration for an inductive and adds it to the namespace
+    fn register_inductive_type(
         &mut self,
         name: &str,
-        binders: &[SyntaxBinder],
-        constructors: &[InductiveConstructor],
+        ind_name: &QualifiedName,
+        binder_fvars: &[(Unique, BinderInfo, Term)],
         span: Span,
     ) {
-        let name = QualifiedName::User(self.gen_.fresh(name.to_string()));
-        let saved_lctx = self.lctx.clone();
-
-        let binder_fvars = self.elaborate_binders(binders);
-        let inductive_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
+        let inductive_type = Self::abstract_binders(binder_fvars, Term::Sort(Level::type0()));
         self.env.decls.insert(
-            name.clone(),
+            ind_name.clone(),
             Declaration::Constructor {
-                name: name.clone(),
+                name: ind_name.clone(),
                 type_: inductive_type,
                 span,
             },
         );
+        self.register_in_namespace(name, ind_name.clone());
+    }
 
-        self.register_in_namespace(&name.display().unwrap(), name.clone());
-        let mut namespace = Namespace::new();
-        let (constructor_names, constructor_types) = self
-            .elaborate_inductive_constructors(&mut namespace, &name, &binder_fvars, constructors)
-            .into_iter()
-            .unzip::<_, _, Vec<_>, Vec<_>>();
+    /// Creates a constructor, registers it, and inserts it into the given namespace
+    fn register_constructor(
+        &mut self,
+        display_name: &str,
+        type_: Term,
+        namespace: &mut Namespace,
+        span: Span,
+    ) -> (QualifiedName, Term) {
+        let ctor_name = QualifiedName::User(self.gen_.fresh(display_name.to_string()));
+        self.env.decls.insert(
+            ctor_name.clone(),
+            Declaration::Constructor {
+                name: ctor_name.clone(),
+                type_: type_.clone(),
+                span,
+            },
+        );
+        namespace
+            .decls
+            .insert(display_name.into(), ctor_name.clone());
+        (ctor_name, type_)
+    }
+
+    /// Registers the match function, merges the child namespace, and creates inductive metadata
+    fn register_inductive(
+        &mut self,
+        name: &str,
+        ind_name: QualifiedName,
+        binder_fvars: &[(Unique, BinderInfo, Term)],
+        constructors: Vec<(QualifiedName, Term)>,
+        mut namespace: Namespace,
+        span: Span,
+    ) {
+        let (constructor_names, constructor_types): (Vec<_>, Vec<_>) =
+            constructors.into_iter().unzip();
+
         let match_fn_name = QualifiedName::User(self.gen_.fresh("match".into()));
         let match_fn_type = self.generate_match_fn_type(
-            &name,
-            &binder_fvars,
+            &ind_name,
+            binder_fvars,
             &constructor_names,
             &constructor_types,
         );
@@ -1056,31 +1093,61 @@ impl ElabState {
                 span,
             },
         );
+        namespace
+            .decls
+            .insert("match".into(), match_fn_name.clone());
 
-        if let Some(existing) = self
-            .env
-            .root_namespace
-            .children
-            .get_mut(&name.display().unwrap().to_string())
-        {
+        let display_name = name.to_string();
+        if let Some(existing) = self.env.root_namespace.children.get_mut(&display_name) {
             existing.decls.extend(namespace.decls);
             existing.children.extend(namespace.children);
         } else {
             self.env
                 .root_namespace
                 .children
-                .insert((&name).display().unwrap().to_string(), namespace);
+                .insert(display_name, namespace);
         }
+
         let metadata = InductiveMetadata {
-            name: name.clone(),
+            name: ind_name.clone(),
             num_params: binder_fvars.len(),
             num_indices: 0, // todo
             constructors: constructor_names,
             match_fn: match_fn_name,
             is_recursive: false, // todo
         };
-        self.env.inductives.insert(name.clone(), metadata);
+        self.env.inductives.insert(ind_name, metadata);
+    }
 
+    fn elaborate_inductive(
+        &mut self,
+        name: &str,
+        binders: &[SyntaxBinder],
+        constructors: &[InductiveConstructor],
+        span: Span,
+    ) {
+        let ind_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let saved_lctx = self.lctx.clone();
+
+        let binder_fvars = self.elaborate_binders(binders);
+        self.register_inductive_type(name, &ind_name, &binder_fvars, span);
+
+        let mut namespace = Namespace::new();
+        let constructor_data = self.elaborate_inductive_constructors(
+            &mut namespace,
+            &ind_name,
+            &binder_fvars,
+            constructors,
+        );
+
+        self.register_inductive(
+            name,
+            ind_name,
+            &binder_fvars,
+            constructor_data,
+            namespace,
+            span,
+        );
         self.lctx = saved_lctx;
     }
 
@@ -1154,10 +1221,19 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
 
         let binder_fvars = self.elaborate_binders(binders);
-        for member in members {
+        self.register_inductive_type(name_str, &name, &binder_fvars, span);
+        let mut constructor_type = Term::Const(name.clone());
+        for (fvar, _, _) in &binder_fvars {
+            constructor_type = Term::App(
+                Box::new(constructor_type),
+                Box::new(Term::FVar(fvar.clone())),
+            );
+        }
+        for member in members.iter().rev() {
             let field_display_name = member.name.clone();
             let field_name = QualifiedName::User(self.gen_.fresh(member.name.clone()));
             let field_type = self.elaborate_term(&member.type_ann, None);
+
             let mut applied_class = Term::Const(name.clone());
             for (fvar, _, _) in &binder_fvars {
                 applied_class =
@@ -1177,29 +1253,25 @@ impl ElabState {
             };
             self.env.decls.insert(field_name.clone(), field_def);
             child_ns.decls.insert(field_display_name, field_name);
+
+            constructor_type = Term::Pi(
+                BinderInfo::Explicit,
+                Box::new(field_type),
+                Box::new(constructor_type),
+            );
         }
 
-        let class_type = Self::abstract_binders(&binder_fvars, Term::Sort(Level::type0()));
-        self.register_in_namespace(&name_str, name.clone());
+        let constructor_type = Self::abstract_binders(&binder_fvars, constructor_type);
 
-        self.env.decls.insert(
-            name.clone(),
-            Declaration::Constructor {
-                name: name.clone(),
-                type_: class_type,
-                span,
-            },
-        );
-        let parent_ns = &mut self.env.root_namespace.children;
-        if let Some(existing) = parent_ns.get_mut(name_str) {
-            existing.decls.extend(child_ns.decls);
-            existing.children.extend(child_ns.children);
-        } else {
-            parent_ns.insert(name_str.to_string(), child_ns);
-        }
-        println!(
-            "Namespace after class elaboration: {:#?}",
-            self.env.root_namespace
+        let constructor = self.register_constructor("new", constructor_type, &mut child_ns, span);
+
+        self.register_inductive(
+            name_str,
+            name,
+            &binder_fvars,
+            alloc::vec![constructor],
+            child_ns,
+            span,
         );
 
         self.lctx = saved_lctx;
@@ -1447,6 +1519,84 @@ impl ElabState {
             result = Term::Pi(info.clone(), Box::new(field_type.clone()), Box::new(result));
         }
         result
+    }
+
+    /// Generates a field projection definition for a record type
+    fn elaborate_field_definition(
+        &mut self,
+        field_name: &QualifiedName,
+        record_name: &QualifiedName,
+        match_fn: &QualifiedName,
+        all_field_types: &[Term],
+        field_index: usize,
+        field_type: &Term,
+        binder_fvars: &[(Unique, BinderInfo, Term)],
+        span: Span,
+    ) -> Declaration {
+        let num_fields = all_field_types.len();
+
+        let mut applied_record = Term::Const(record_name.clone());
+        for (fvar, _, _) in binder_fvars {
+            applied_record =
+                Term::App(Box::new(applied_record), Box::new(Term::FVar(fvar.clone())));
+        }
+
+        let mut branch = Term::BVar(num_fields - 1 - field_index);
+        for ft in all_field_types.iter().rev() {
+            branch = Term::Lam(BinderInfo::Explicit, Box::new(ft.clone()), Box::new(branch));
+        }
+
+        // Build the motive: λ (_ : R params) => field_type
+        let motive = Term::Lam(
+            BinderInfo::Explicit,
+            Box::new(applied_record.clone()),
+            Box::new(field_type.clone()),
+        );
+
+        // Scrutinee is the free variable for the record argument
+        let scrutinee_fvar = self.gen_.fresh_unnamed();
+        let scrutinee = Term::FVar(scrutinee_fvar.clone());
+
+        // Build: match_fn motive scrutinee branch
+        let body = Term::App(
+            Box::new(Term::App(
+                Box::new(Term::App(
+                    Box::new(Term::Const(match_fn.clone())),
+                    Box::new(motive),
+                )),
+                Box::new(scrutinee),
+            )),
+            Box::new(branch),
+        );
+
+        // Wrap in λ (x : R params) => body
+        let value = subst::abstract_fvar(&body, scrutinee_fvar.clone());
+        let value = Term::Lam(
+            BinderInfo::Explicit,
+            Box::new(applied_record.clone()),
+            Box::new(value),
+        );
+
+        let mut value = value;
+        for (fvar, info, ty) in binder_fvars.iter().rev() {
+            value = subst::abstract_fvar(&value, fvar.clone());
+            value = Term::Lam(info.clone(), Box::new(ty.clone()), Box::new(value));
+        }
+
+        // Build the type: {params} -> R params -> field_type
+        let proj_type = Term::Pi(
+            BinderInfo::Explicit,
+            Box::new(applied_record),
+            Box::new(field_type.clone()),
+        );
+        let proj_type = Self::abstract_binders(binder_fvars, proj_type);
+
+        Declaration::Definition {
+            name: field_name.clone(),
+            type_: proj_type,
+            value,
+            span,
+        }
     }
 }
 
