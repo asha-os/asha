@@ -60,6 +60,7 @@ pub enum SyntaxTreeDeclaration {
     },
     Inductive {
         name: String,
+        index_type: Option<SyntaxExpr>,
         binders: Vec<SyntaxBinder>,
         constructors: Vec<InductiveConstructor>,
         span: Span,

@@ -125,7 +125,8 @@ pub fn compile(
     let mut branches = Vec::new();
     for ctor_name in &ctors {
         let ctor_type = state.env.lookup(ctor_name).unwrap().type_().clone();
-        let ctor_return_args = extract_return_type_args(&ctor_type, num_params, &param_args);
+        let ctor_return_args =
+            extract_return_type_args(&mut state.gen_, &ctor_type, num_params, &param_args);
 
         let saved_mctx = state.mctx.clone();
         let possible = ctor_return_args.len() == all_args.len()
@@ -246,6 +247,7 @@ fn extract_field_types(ctor_type: &Term, num_params: usize, type_args: &[Term]) 
 
 /// Extracts the return type arguments from a constructor's Pi type
 fn extract_return_type_args(
+    gen_: &mut UniqueGen,
     ctor_type: &Term,
     num_params: usize,
     param_args: &[Term],
@@ -261,7 +263,8 @@ fn extract_return_type_args(
         }
     }
     while let Term::Pi(_, _, body) = current {
-        current = *body;
+        let mvar = Term::MVar(gen_.fresh_unnamed());
+        current = subst::instantiate(&body, &mvar);
     }
     extract_all_args(&current)
 }

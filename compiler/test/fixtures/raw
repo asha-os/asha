@@ -8,9 +8,9 @@ inductive Option (a : Type) {
     some : a -> Option a
 }
 
-inductive Array (a : Type) (n : Nat) {
+inductive Array (a : Type) : Nat -> Type {
     nil : Array a Nat::zero,
-    cons : a -> Array a n -> Array a (Nat::succ n)
+    cons {n : Nat} : a -> Array a n -> Array a (Nat::succ n)
 }
 
 def head {a : Type} {n : Nat} : Array a (Nat::succ n) -> Option a

@@ -26,6 +26,10 @@ impl Term {
     pub fn mk_app(l: Term, r: Term) -> Self {
         Self::App(l.boxed(), r.boxed())
     }
+
+    pub fn type0() -> Self {
+        Term::Sort(Level::type0())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

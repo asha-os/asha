@@ -379,17 +379,25 @@ fn inductive_parser<'a>(
             binder(expr.clone())
                 .repeated()
                 .collect::<Vec<_>>()
+                .then(
+                    just_token(TokenKind::Colon)
+                        .ignore_then(expr.clone())
+                        .or_not(),
+                )
                 .then_ignore(just_token(TokenKind::LBrace))
                 .then(inductive_constructors_parser(expr))
                 .then_ignore(just_token(TokenKind::Comma).or_not())
                 .then(just_token(TokenKind::RBrace)),
         )
         .map(
-            |((inductive_tok, name_tok), ((binders, constructors), rbraces))| Decl::Inductive {
-                span: spanning(&inductive_tok, &rbraces),
-                name: lexeme_to_string(name_tok.lexeme),
-                binders,
-                constructors,
+            |((inductive_tok, name_tok), (((binders, index_type), constructors), rbraces))| {
+                Decl::Inductive {
+                    span: spanning(&inductive_tok, &rbraces),
+                    name: lexeme_to_string(name_tok.lexeme),
+                    index_type,
+                    binders,
+                    constructors,
+                }
             },
         )
 }

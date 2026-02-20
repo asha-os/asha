@@ -137,9 +137,9 @@ impl Environment {
     pub fn pre_loaded(module_id: ModuleId) -> Self {
         let mut externals = BTreeMap::new();
         let inductives = BTreeMap::new();
-        externals.insert(PRIM_NAT, Term::Sort(Level::type0()));
-        externals.insert(PRIM_STRING, Term::Sort(Level::type0()));
-        externals.insert(PRIM_BOOL, Term::Sort(Level::type0()));
+        externals.insert(PRIM_NAT, Term::type0());
+        externals.insert(PRIM_STRING, Term::type0());
+        externals.insert(PRIM_BOOL, Term::type0());
         externals.insert(PRIM_TRUE, Term::Const(PRIM_BOOL));
         externals.insert(PRIM_FALSE, Term::Const(PRIM_BOOL));
         externals.insert(
@@ -147,18 +147,18 @@ impl Environment {
             Term::Pi(
                 BinderInfo::Explicit,
                 Box::new(Term::Const(PRIM_NAT)),
-                Box::new(Term::Sort(Level::type0())),
+                Box::new(Term::type0()),
             ),
         );
         externals.insert(
             PRIM_ARRAY,
             Term::Pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Sort(Level::type0())),
+                Box::new(Term::type0()),
                 Box::new(Term::Pi(
                     BinderInfo::Explicit,
                     Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::Sort(Level::type0())),
+                    Box::new(Term::type0()),
                 )),
             ),
         );
@@ -166,8 +166,8 @@ impl Environment {
             PRIM_IO,
             Term::Pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Sort(Level::type0())),
-                Box::new(Term::Sort(Level::type0())),
+                Box::new(Term::type0()),
+                Box::new(Term::type0()),
             ),
         );
         externals.insert(
@@ -425,9 +425,10 @@ impl ElabState {
             SyntaxTreeDeclaration::Inductive {
                 name,
                 binders,
+                index_type,
                 constructors,
                 span,
-            } => self.elaborate_inductive(name, binders, constructors, *span),
+            } => self.elaborate_inductive(name, binders, index_type, constructors, *span),
             SyntaxTreeDeclaration::Class {
                 name,
                 binders,
@@ -624,11 +625,11 @@ impl ElabState {
                 (self.erroneous_term(), self.erroneous_term())
             }
             SyntaxExpr::Constructor { name, .. } if name == "Type" => (
-                Term::Sort(Level::type0()),
+                Term::type0(),
                 Term::Sort(Level::Succ(Box::new(Level::type0()))),
             ),
             SyntaxExpr::Constructor { name, .. } if name == "Prop" => {
-                (Term::Sort(Level::Zero), Term::Sort(Level::type0()))
+                (Term::Sort(Level::Zero), Term::type0())
             }
             SyntaxExpr::Constructor {
                 namespace, name, ..
@@ -657,7 +658,7 @@ impl ElabState {
                     let (_term, head_ty) = self.elaborate_term_inner(head);
                     head_ty
                 } else {
-                    self.fresh_mvar(Term::Sort(Level::type0()))
+                    self.fresh_mvar(Term::type0())
                 };
                 let elems_len = elems.len() as u64;
 
@@ -814,7 +815,7 @@ impl ElabState {
                         Box::new(elaborated_param_type.clone()),
                         Box::new(elaborated_return_type.clone()),
                     ),
-                    Term::Sort(Level::type0()),
+                    Term::type0(),
                 )
             }
             SyntaxExpr::Lambda { binders, body, .. } => {
@@ -833,7 +834,7 @@ impl ElabState {
                 self.lctx = saved_lctx;
                 (term, result_type)
             }
-            SyntaxExpr::Unit { .. } => (Term::Unit, Term::Sort(Level::type0())),
+            SyntaxExpr::Unit { .. } => (Term::Unit, Term::type0()),
             u => {
                 self.errors.push(ElabError::new(
                     err::ElabErrorKind::UnsupportedSyntax(u.clone()),
@@ -929,7 +930,7 @@ impl ElabState {
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
-        self.register_inductive_type(name, &record_name, &binder_fvars, span);
+        self.register_inductive_type(name, &record_name, &binder_fvars, Term::type0(), span);
 
         let mut field_data: Vec<(String, QualifiedName, Term)> = Vec::new();
         for field in fields {
@@ -1029,9 +1030,10 @@ impl ElabState {
         name: &str,
         ind_name: &QualifiedName,
         binder_fvars: &[(Unique, BinderInfo, Term)],
+        index_type: Term,
         span: Span,
     ) {
-        let inductive_type = Self::abstract_binders(binder_fvars, Term::Sort(Level::type0()));
+        let inductive_type = Self::abstract_binders(binder_fvars, index_type);
         self.env.decls.insert(
             ind_name.clone(),
             Declaration::Constructor {
@@ -1124,6 +1126,7 @@ impl ElabState {
         &mut self,
         name: &str,
         binders: &[SyntaxBinder],
+        index_type: &Option<SyntaxExpr>,
         constructors: &[InductiveConstructor],
         span: Span,
     ) {
@@ -1131,7 +1134,12 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
 
         let binder_fvars = self.elaborate_binders(binders);
-        self.register_inductive_type(name, &ind_name, &binder_fvars, span);
+        let index_type = if let Some(index_ty) = index_type {
+            self.elaborate_term(index_ty, None)
+        } else {
+            Term::type0()
+        };
+        self.register_inductive_type(name, &ind_name, &binder_fvars, index_type, span);
 
         let mut namespace = Namespace::new();
         let constructor_data = self.elaborate_inductive_constructors(
@@ -1222,7 +1230,7 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
 
         let binder_fvars = self.elaborate_binders(binders);
-        self.register_inductive_type(name_str, &name, &binder_fvars, span);
+        self.register_inductive_type(name_str, &name, &binder_fvars, Term::type0(), span);
         let mut constructor_type = Term::Const(name.clone());
         for (fvar, _, _) in &binder_fvars {
             constructor_type = Term::App(
@@ -1343,11 +1351,12 @@ impl ElabState {
                     return Pattern::Var(None);
                 };
                 let ctor_qname = ctor_qname.clone();
-                let ctor_type = ctor_type.clone();
+                let ctor_type_before = ctor_type.clone();
 
                 // Insert implicit arguments for the constructor type
                 let (_ctor_term, ctor_type) =
-                    self.insert_implicit_args(Term::Const(ctor_qname.clone()), ctor_type);
+                    self.insert_implicit_args(Term::Const(ctor_qname.clone()), ctor_type.clone());
+                let num_implicits = count_leading_implicits(&ctor_type_before);
 
                 let mut current_type = reduce::whnf(self, &ctor_type);
                 let mut arg_types = Vec::new();
@@ -1389,9 +1398,16 @@ impl ElabState {
                             .map(|arg_type| self.elaborate_pattern(arg, arg_type))
                     })
                     .collect::<Vec<_>>();
+
+                let mut all_fields = Vec::new();
+                for _ in 0..num_implicits {
+                    all_fields.push(Pattern::Var(None));
+                }
+                all_fields.extend(elaborated_args);
+
                 Pattern::Constructor {
                     ctor: ctor_qname,
-                    fields: elaborated_args,
+                    fields: all_fields,
                     type_: ctor_type,
                 }
             }
@@ -1412,7 +1428,7 @@ impl ElabState {
         let motive_type = Term::Pi(
             BinderInfo::Explicit,
             Box::new(Term::Const(inductive_name.clone())),
-            Box::new(Term::Sort(Level::type0())),
+            Box::new(Term::type0()),
         );
         let (motive_fvar, _) = self.fresh_fvar("_motive".into(), motive_type.clone());
         let motive = Term::FVar(motive_fvar.clone());
@@ -1621,4 +1637,17 @@ pub fn elaborate_file(
     } else {
         Err(state.errors)
     }
+}
+
+fn count_leading_implicits(ty: &Term) -> usize {
+    let mut count = 0;
+    let mut current = ty;
+    while let Term::Pi(info, _, body) = current {
+        if *info == BinderInfo::Explicit {
+            break;
+        }
+        count += 1;
+        current = body;
+    }
+    count
 }
