@@ -1,6 +1,9 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 
-use crate::{module::unique::Unique, spine::Term};
+use crate::{
+    module::{name::QualifiedName, unique::Unique},
+    spine::Term,
+};
 
 /// Substitutes `replacement` for `BVar(0)` in `term` (beta reduction).
 ///
@@ -209,6 +212,74 @@ pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
             Box::new(replace_fvar(ty, fvar, replacement)),
             Box::new(replace_fvar(val, fvar, replacement)),
             Box::new(replace_fvar(body, fvar, replacement)),
+        ),
+    }
+}
+
+/// Collects the head constant and arguments from an application spine
+fn collect_app_spine(term: &Term) -> (&Term, Vec<&Term>) {
+    let mut args = Vec::new();
+    let mut current = term;
+    while let Term::App(f, a) = current {
+        args.push(a.as_ref());
+        current = f.as_ref();
+    }
+    args.reverse();
+    (current, args)
+}
+
+/// Replaces recursive calls in a term
+pub fn replace_rec_call(
+    term: &Term,
+    fn_name: &QualifiedName,
+    structural_arg: &Unique,
+    replacement: &Term,
+) -> Term {
+    if let Term::App(_, last_arg) = term {
+        if let Term::FVar(u) = last_arg.as_ref() {
+            if *u == *structural_arg {
+                let (head, _) = collect_app_spine(term);
+                if let Term::Const(name) = head {
+                    if name == fn_name {
+                        return replacement.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    match term {
+        Term::Unit
+        | Term::BVar(_)
+        | Term::Const(_)
+        | Term::FVar(_)
+        | Term::MVar(_)
+        | Term::Lit(_)
+        | Term::Sort(_) => term.clone(),
+
+        Term::App(f, a) => Term::App(
+            Box::new(replace_rec_call(f, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(a, fn_name, structural_arg, replacement)),
+        ),
+        Term::Lam(info, ty, body) => Term::Lam(
+            info.clone(),
+            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+        ),
+        Term::Pi(info, ty, body) => Term::Pi(
+            info.clone(),
+            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+        ),
+        Term::Sigma(info, ty, body) => Term::Sigma(
+            info.clone(),
+            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+        ),
+        Term::Let(ty, val, body) => Term::Let(
+            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(val, fn_name, structural_arg, replacement)),
+            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
         ),
     }
 }

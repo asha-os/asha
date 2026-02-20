@@ -46,7 +46,7 @@ use crate::{
         err::{ElabError, ElabErrorKind},
         metadata::InductiveMetadata,
         patterns::{MatchProblem, Pattern, PatternRow, Scrutinee},
-        reduce::head_const,
+        reduce::{head_const, is_recursive_field},
     },
     module::{
         ModuleId,
@@ -269,22 +269,30 @@ pub enum Declaration {
         type_: Term,
         span: Span,
     },
+    /// A forward-declared definition whose body we don't want to unfold for some reason.
+    Opaque {
+        name: QualifiedName,
+        type_: Term,
+        span: Span,
+    },
 }
 
 impl Declaration {
     /// Returns the declaration's [`QualifiedName`].
     pub fn name(&self) -> &QualifiedName {
         match self {
-            Declaration::Definition { name, .. } => name,
-            Declaration::Constructor { name, .. } => name,
+            Declaration::Definition { name, .. }
+            | Declaration::Constructor { name, .. }
+            | Declaration::Opaque { name, .. } => name,
         }
     }
 
     /// Returns the declaration's type.
     pub fn type_(&self) -> &Term {
         match self {
-            Declaration::Definition { type_, .. } => type_,
-            Declaration::Constructor { type_, .. } => type_,
+            Declaration::Definition { type_, .. }
+            | Declaration::Constructor { type_, .. }
+            | Declaration::Opaque { type_, .. } => type_,
         }
     }
 }
@@ -495,9 +503,22 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
         let elaborated_return_type = self.elaborate_term(return_type, None);
+        let pi_type = Self::abstract_binders(&binder_fvars, elaborated_return_type.clone());
+
         let elaborated_body = match body {
             DefBody::Expr(body) => self.elaborate_term(body, Some(&elaborated_return_type)),
             DefBody::PatternMatch { arms, span } => {
+                // Pre-register as Opaque so recursive calls resolve during body elaboration
+                self.env.decls.insert(
+                    def_name.clone(),
+                    Declaration::Opaque {
+                        name: def_name.clone(),
+                        type_: pi_type.clone(),
+                        span: *span,
+                    },
+                );
+                self.register_in_namespace(name, def_name.clone());
+
                 let (pattern_return_type, scrutinee_types) =
                     uncurry(elaborated_return_type.clone());
                 let n = scrutinee_types.len();
@@ -509,8 +530,13 @@ impl ElabState {
                         type_: ty.clone(),
                     })
                     .collect::<Vec<_>>();
-                let body =
-                    self.elaborate_pattern_match(scrutinees, arms, pattern_return_type, *span);
+                let body = self.elaborate_pattern_match(
+                    scrutinees,
+                    arms,
+                    pattern_return_type,
+                    Some(def_name.clone()),
+                    *span,
+                );
 
                 let mut lambda = body;
                 for (_, scrutinee_type) in scrutinee_types.iter().rev() {
@@ -524,7 +550,6 @@ impl ElabState {
             }
         };
 
-        let pi_type = Self::abstract_binders(&binder_fvars, elaborated_return_type);
         let mut value = elaborated_body;
         for (fvar, _, _) in binder_fvars.iter().rev() {
             value = subst::abstract_fvar(&value, fvar.clone());
@@ -539,7 +564,9 @@ impl ElabState {
                 span,
             },
         );
-        self.register_in_namespace(name, def_name);
+        if !matches!(body, DefBody::PatternMatch { .. }) {
+            self.register_in_namespace(name, def_name);
+        }
 
         self.lctx = saved_lctx;
     }
@@ -1188,6 +1215,7 @@ impl ElabState {
         scrutinees: Vec<Scrutinee>,
         arms: &[PatternMatchArm],
         expected_type: Term,
+        match_fn: Option<QualifiedName>,
         span: Span,
     ) -> Term {
         let rows = arms
@@ -1208,7 +1236,7 @@ impl ElabState {
                 PatternRow::new(patterns, rhs)
             })
             .collect::<Vec<_>>();
-        let problem = MatchProblem::new(scrutinees, rows, expected_type);
+        let problem = MatchProblem::new(scrutinees, rows, expected_type, match_fn);
 
         match patterns::compile(&self.env, &mut self.gen_, problem, span) {
             Ok(term) => term,
@@ -1320,8 +1348,13 @@ impl ElabState {
 
         let mut branch_types = Vec::new();
         for (ctor_name, ctor_type) in constructor_names.iter().zip(constructors_types.iter()) {
-            let branch_type =
-                Self::build_branch_type(ctor_name, ctor_type, binder_fvars.len(), &motive);
+            let branch_type = Self::build_branch_type(
+                ctor_name,
+                inductive_name,
+                ctor_type,
+                binder_fvars.len(),
+                &motive,
+            );
             branch_types.push(branch_type);
         }
 
@@ -1362,6 +1395,7 @@ impl ElabState {
     /// Builds the branch type for a single constructor in the match function.
     fn build_branch_type(
         ctor_name: &QualifiedName,
+        inductive_name: &QualifiedName,
         ctor_type: &Term,
         num_params: usize,
         motive: &Term,
@@ -1382,13 +1416,33 @@ impl ElabState {
 
         let num_fields = field_binders.len();
 
+        let recursive_fields: Vec<usize> = field_binders
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, ty))| is_recursive_field(ty, inductive_name))
+            .map(|(i, _)| i)
+            .collect();
+        let num_ihs = recursive_fields.len();
+
         let mut ctor_app = Term::Const(ctor_name.clone());
         for i in 0..num_fields {
-            ctor_app = Term::App(Box::new(ctor_app), Box::new(Term::BVar(num_fields - 1 - i)));
+            ctor_app = Term::App(
+                Box::new(ctor_app),
+                Box::new(Term::BVar(num_ihs + num_fields - 1 - i)),
+            );
         }
 
         let mut result = Term::App(Box::new(motive.clone()), Box::new(ctor_app));
 
+        // Wrap IH binders (k is current binders, field_idx is the position of the recursive field in the constructor type)
+        for (k, &field_idx) in recursive_fields.iter().enumerate().rev() {
+            // The field sits at depth: k + (num_fields - 1 - field_idx)
+            let field_ref = Term::BVar(k + num_fields - 1 - field_idx);
+            let ih_ty = Term::App(Box::new(motive.clone()), Box::new(field_ref));
+            result = Term::Pi(BinderInfo::Explicit, Box::new(ih_ty), Box::new(result));
+        }
+
+        // Wrap field binders
         for (info, field_type) in field_binders.iter().rev() {
             result = Term::Pi(info.clone(), Box::new(field_type.clone()), Box::new(result));
         }

@@ -44,3 +44,15 @@ pub fn head_const(term: &Term) -> Option<&QualifiedName> {
         _ => None,
     }
 }
+
+/// Checks if a field type is recursive
+pub fn is_recursive_field(field_ty: &Term, inductive_name: &QualifiedName) -> bool {
+    match field_ty {
+        Term::Const(name) => name == inductive_name,
+        Term::App(fun, _) => match &**fun {
+            Term::Const(name) => name == inductive_name,
+            _ => false,
+        },
+        _ => false,
+    }
+}

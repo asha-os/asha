@@ -4,7 +4,7 @@ use crate::{
     elaboration::{
         Environment,
         err::{ElabError, ElabErrorKind},
-        reduce::head_const,
+        reduce::{head_const, is_recursive_field},
         subst,
     },
     module::{
@@ -54,14 +54,21 @@ pub struct MatchProblem {
     pub scrutinees: Vec<Scrutinee>,
     pub rows: Vec<PatternRow>,
     pub return_type: Term,
+    pub match_fn: Option<QualifiedName>,
 }
 
 impl MatchProblem {
-    pub fn new(scrutinees: Vec<Scrutinee>, rows: Vec<PatternRow>, return_type: Term) -> Self {
+    pub fn new(
+        scrutinees: Vec<Scrutinee>,
+        rows: Vec<PatternRow>,
+        return_type: Term,
+        match_fn: Option<QualifiedName>,
+    ) -> Self {
         Self {
             scrutinees,
             rows,
             return_type,
+            match_fn,
         }
     }
 }
@@ -94,6 +101,13 @@ pub fn compile(
 
     let type_args = extract_type_args(type_, num_params);
 
+    let scrutinee_type = problem.scrutinees[col].type_.clone();
+    let motive_term = Term::Lam(
+        BinderInfo::Explicit,
+        Box::new(scrutinee_type.clone()),
+        Box::new(problem.return_type.clone()),
+    );
+
     let mut branches = Vec::new();
     for ctor_name in &ctors {
         let ctor_type = env.lookup(ctor_name).unwrap().type_().clone();
@@ -114,6 +128,35 @@ pub fn compile(
 
         // Abstract field fvars and wrap with lambdas
         let mut result = branch_body;
+
+        // First, wrap IH lambdas
+        let inductive_name = &inductive.name;
+        for (fvar, field_type) in field_fvars.iter().rev().zip(field_types.iter().rev()) {
+            if is_recursive_field(field_type, inductive_name) {
+                let ih_fvar = gen_.fresh_unnamed();
+
+                // Replace recursive calls on this field with the IH fvar
+                if let Some(ref rec_fn) = problem.match_fn {
+                    result = subst::replace_rec_call(
+                        &result,
+                        rec_fn,
+                        fvar,
+                        &Term::FVar(ih_fvar.clone()),
+                    );
+                }
+
+                result = subst::abstract_fvar(&result, ih_fvar);
+                result = Term::Lam(
+                    BinderInfo::Explicit,
+                    Box::new(Term::App(
+                        Box::new(motive_term.clone()),
+                        Box::new(Term::FVar(fvar.clone())),
+                    )),
+                    Box::new(result),
+                );
+            }
+        }
+
         for (fvar, field_type) in field_fvars.iter().rev().zip(field_types.iter().rev()) {
             result = subst::abstract_fvar(&result, fvar.clone());
             result = Term::Lam(
@@ -125,16 +168,12 @@ pub fn compile(
         branches.push(result);
     }
 
-    let scrutinee_type = problem.scrutinees[col].type_.clone();
-    let motive = Term::Lam(
-        BinderInfo::Explicit,
-        Box::new(scrutinee_type),
-        Box::new(problem.return_type.clone()),
-    );
-
     let match_fn = inductive.match_fn.clone();
     let mut result = Term::App(
-        Box::new(Term::App(Box::new(Term::Const(match_fn)), Box::new(motive))),
+        Box::new(Term::App(
+            Box::new(Term::Const(match_fn)),
+            Box::new(motive_term),
+        )),
         Box::new(scrutinee),
     );
     for branch in branches {
@@ -259,6 +298,7 @@ fn specialize(
         scrutinees: new_scrutinees,
         rows: new_rows,
         return_type: problem.return_type.clone(),
+        match_fn: problem.match_fn.clone(),
     };
     (sub_problem, field_fvars)
 }
@@ -304,5 +344,6 @@ fn all_variables_elimination(problem: MatchProblem, col: usize) -> MatchProblem 
             .collect(),
         rows: new_rows,
         return_type: problem.return_type,
+        match_fn: problem.match_fn,
     }
 }

@@ -14,7 +14,7 @@ def is_zero : ScottNat -> Bool
 
 def funny (first : ScottNat) : ScottNat -> Bool
     | ScottNat::zero => true
-    | ScottNat::succ _ => false
+    | ScottNat::succ c => is_zero c
 
 def is_nil {a : Type} : ScottList a -> Bool
     | ScottList::nil => true
@@ -22,4 +22,4 @@ def is_nil {a : Type} : ScottList a -> Bool
 
 def map {a : Type} {b : Type} (f : a -> b) : ScottList a -> ScottList b
     | ScottList::nil => ScottList::nil
-    | ScottList::cons x xs => ScottList::cons (f x) ScottList::nil
+    | ScottList::cons x xs => ScottList::cons (f x) (map f xs)

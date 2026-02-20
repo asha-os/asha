@@ -37,6 +37,9 @@ impl Display for Declaration {
             Declaration::Constructor { name, type_, .. } => {
                 write!(f, "constructor {} : {}", name.display().unwrap(), type_)
             }
+            Declaration::Opaque { name, type_, .. } => {
+                write!(f, "opaque {} : {}", name.display().unwrap(), type_)
+            }
         }
     }
 }
