@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 
 use crate::{
     module::{name::QualifiedName, unique::Unique},
@@ -33,29 +33,29 @@ fn instantiate_at(term: &Term, replacement: &Term, depth: usize) -> Term {
         | Term::MVar(_)
         | Term::Lit(_)
         | Term::Sort(_) => term.clone(),
-        Term::App(f, a) => Term::App(
-            Box::new(instantiate_at(f, replacement, depth)),
-            Box::new(instantiate_at(a, replacement, depth)),
+        Term::App(f, a) => Term::mk_app(
+            instantiate_at(f, replacement, depth),
+            instantiate_at(a, replacement, depth),
         ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(instantiate_at(ty, replacement, depth)),
-            Box::new(instantiate_at(body, replacement, depth + 1)),
+            instantiate_at(ty, replacement, depth),
+            instantiate_at(body, replacement, depth + 1),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(instantiate_at(ty, replacement, depth)),
-            Box::new(instantiate_at(body, replacement, depth + 1)),
+            instantiate_at(ty, replacement, depth),
+            instantiate_at(body, replacement, depth + 1),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(instantiate_at(ty, replacement, depth)),
-            Box::new(instantiate_at(body, replacement, depth + 1)),
+            instantiate_at(ty, replacement, depth),
+            instantiate_at(body, replacement, depth + 1),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(instantiate_at(ty, replacement, depth)),
-            Box::new(instantiate_at(val, replacement, depth)),
-            Box::new(instantiate_at(body, replacement, depth + 1)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            instantiate_at(ty, replacement, depth),
+            instantiate_at(val, replacement, depth),
+            instantiate_at(body, replacement, depth + 1),
         ),
     }
 }
@@ -91,29 +91,26 @@ fn shift_at(term: &Term, amount: usize, depth: usize) -> Term {
         | Term::Lit(_)
         | Term::Sort(_) => term.clone(),
 
-        Term::App(f, a) => Term::App(
-            Box::new(shift_at(f, amount, depth)),
-            Box::new(shift_at(a, amount, depth)),
-        ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::App(f, a) => Term::mk_app(shift_at(f, amount, depth), shift_at(a, amount, depth)),
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(shift_at(ty, amount, depth)),
-            Box::new(shift_at(body, amount, depth + 1)),
+            shift_at(ty, amount, depth),
+            shift_at(body, amount, depth + 1),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(shift_at(ty, amount, depth)),
-            Box::new(shift_at(body, amount, depth + 1)),
+            shift_at(ty, amount, depth),
+            shift_at(body, amount, depth + 1),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(shift_at(ty, amount, depth)),
-            Box::new(shift_at(body, amount, depth + 1)),
+            shift_at(ty, amount, depth),
+            shift_at(body, amount, depth + 1),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(shift_at(ty, amount, depth)),
-            Box::new(shift_at(val, amount, depth)),
-            Box::new(shift_at(body, amount, depth + 1)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            shift_at(ty, amount, depth),
+            shift_at(val, amount, depth),
+            shift_at(body, amount, depth + 1),
         ),
     }
 }
@@ -149,29 +146,29 @@ fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
         | Term::Lit(_)
         | Term::Sort(_) => term.clone(),
 
-        Term::App(f, a) => Term::App(
-            Box::new(abstract_fvar_at(f, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(a, fvar, depth)),
+        Term::App(f, a) => Term::mk_app(
+            abstract_fvar_at(f, fvar.clone(), depth),
+            abstract_fvar_at(a, fvar, depth),
         ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(abstract_fvar_at(ty, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(body, fvar, depth + 1)),
+            abstract_fvar_at(ty, fvar.clone(), depth),
+            abstract_fvar_at(body, fvar, depth + 1),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(abstract_fvar_at(ty, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(body, fvar, depth + 1)),
+            abstract_fvar_at(ty, fvar.clone(), depth),
+            abstract_fvar_at(body, fvar, depth + 1),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(abstract_fvar_at(ty, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(body, fvar, depth + 1)),
+            abstract_fvar_at(ty, fvar.clone(), depth),
+            abstract_fvar_at(body, fvar, depth + 1),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(abstract_fvar_at(ty, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(val, fvar.clone(), depth)),
-            Box::new(abstract_fvar_at(body, fvar, depth + 1)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            abstract_fvar_at(ty, fvar.clone(), depth),
+            abstract_fvar_at(val, fvar.clone(), depth),
+            abstract_fvar_at(body, fvar, depth + 1),
         ),
     }
 }
@@ -189,29 +186,29 @@ pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
         | Term::Lit(_)
         | Term::Sort(_) => term.clone(),
 
-        Term::App(f, a) => Term::App(
-            Box::new(replace_fvar(f, fvar, replacement)),
-            Box::new(replace_fvar(a, fvar, replacement)),
+        Term::App(f, a) => Term::mk_app(
+            replace_fvar(f, fvar, replacement),
+            replace_fvar(a, fvar, replacement),
         ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(replace_fvar(ty, fvar, replacement)),
-            Box::new(replace_fvar(body, fvar, replacement)),
+            replace_fvar(ty, fvar, replacement),
+            replace_fvar(body, fvar, replacement),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(replace_fvar(ty, fvar, replacement)),
-            Box::new(replace_fvar(body, fvar, replacement)),
+            replace_fvar(ty, fvar, replacement),
+            replace_fvar(body, fvar, replacement),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(replace_fvar(ty, fvar, replacement)),
-            Box::new(replace_fvar(body, fvar, replacement)),
+            replace_fvar(ty, fvar, replacement),
+            replace_fvar(body, fvar, replacement),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(replace_fvar(ty, fvar, replacement)),
-            Box::new(replace_fvar(val, fvar, replacement)),
-            Box::new(replace_fvar(body, fvar, replacement)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            replace_fvar(ty, fvar, replacement),
+            replace_fvar(val, fvar, replacement),
+            replace_fvar(body, fvar, replacement),
         ),
     }
 }
@@ -235,17 +232,14 @@ pub fn replace_rec_call(
     structural_arg: &Unique,
     replacement: &Term,
 ) -> Term {
-    if let Term::App(_, last_arg) = term {
-        if let Term::FVar(u) = last_arg.as_ref() {
-            if *u == *structural_arg {
-                let (head, _) = collect_app_spine(term);
-                if let Term::Const(name) = head {
-                    if name == fn_name {
-                        return replacement.clone();
-                    }
-                }
-            }
-        }
+    if let Term::App(_, last_arg) = term
+        && let Term::FVar(u) = last_arg.as_ref()
+        && *u == *structural_arg
+        && let (head, _) = collect_app_spine(term)
+        && let Term::Const(name) = head
+        && name == fn_name
+    {
+        return replacement.clone();
     }
 
     match term {
@@ -257,29 +251,29 @@ pub fn replace_rec_call(
         | Term::Lit(_)
         | Term::Sort(_) => term.clone(),
 
-        Term::App(f, a) => Term::App(
-            Box::new(replace_rec_call(f, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(a, fn_name, structural_arg, replacement)),
+        Term::App(f, a) => Term::mk_app(
+            replace_rec_call(f, fn_name, structural_arg, replacement),
+            replace_rec_call(a, fn_name, structural_arg, replacement),
         ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+            replace_rec_call(ty, fn_name, structural_arg, replacement),
+            replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+            replace_rec_call(ty, fn_name, structural_arg, replacement),
+            replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+            replace_rec_call(ty, fn_name, structural_arg, replacement),
+            replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(replace_rec_call(ty, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(val, fn_name, structural_arg, replacement)),
-            Box::new(replace_rec_call(body, fn_name, structural_arg, replacement)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            replace_rec_call(ty, fn_name, structural_arg, replacement),
+            replace_rec_call(val, fn_name, structural_arg, replacement),
+            replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
     }
 }

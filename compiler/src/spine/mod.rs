@@ -27,6 +27,22 @@ impl Term {
         Self::App(l.boxed(), r.boxed())
     }
 
+    pub fn mk_pi(info: BinderInfo, param: Term, body: Term) -> Self {
+        Self::Pi(info, param.boxed(), body.boxed())
+    }
+
+    pub fn mk_lam(info: BinderInfo, param: Term, body: Term) -> Self {
+        Self::Lam(info, param.boxed(), body.boxed())
+    }
+
+    pub fn mk_sigma(info: BinderInfo, param: Term, body: Term) -> Self {
+        Self::Sigma(info, param.boxed(), body.boxed())
+    }
+
+    pub fn mk_let(ty: Term, val: Term, body: Term) -> Self {
+        Self::Let(ty.boxed(), val.boxed(), body.boxed())
+    }
+
     pub fn type0() -> Self {
         Term::Sort(Level::type0())
     }
@@ -56,6 +72,10 @@ pub enum Level {
 }
 
 impl Level {
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
+
     pub fn type0() -> Self {
         Level::Succ(Box::new(Level::Zero))
     }

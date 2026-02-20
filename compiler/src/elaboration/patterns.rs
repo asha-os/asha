@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use api::println;
 
 use crate::{
@@ -116,10 +116,10 @@ pub fn compile(
         .collect::<Vec<_>>();
 
     let scrutinee_type = problem.scrutinees[col].type_.clone();
-    let motive_term = Term::Lam(
+    let motive_term = Term::mk_lam(
         BinderInfo::Explicit,
-        Box::new(scrutinee_type.clone()),
-        Box::new(problem.return_type.clone()),
+        scrutinee_type.clone(),
+        problem.return_type.clone(),
     );
 
     let mut branches = Vec::new();
@@ -176,37 +176,24 @@ pub fn compile(
                 }
 
                 result = subst::abstract_fvar(&result, ih_fvar);
-                result = Term::Lam(
+                result = Term::mk_lam(
                     BinderInfo::Explicit,
-                    Box::new(Term::App(
-                        Box::new(motive_term.clone()),
-                        Box::new(Term::FVar(fvar.clone())),
-                    )),
-                    Box::new(result),
+                    Term::mk_app(motive_term.clone(), Term::FVar(fvar.clone())),
+                    result,
                 );
             }
         }
 
         for (fvar, field_type) in field_fvars.iter().rev().zip(field_types.iter().rev()) {
             result = subst::abstract_fvar(&result, fvar.clone());
-            result = Term::Lam(
-                BinderInfo::Explicit,
-                Box::new(field_type.clone()),
-                Box::new(result),
-            );
+            result = Term::mk_lam(BinderInfo::Explicit, field_type.clone(), result);
         }
         branches.push(result);
     }
 
-    let mut result = Term::App(
-        Box::new(Term::App(
-            Box::new(Term::Const(match_fn)),
-            Box::new(motive_term),
-        )),
-        Box::new(scrutinee),
-    );
+    let mut result = Term::mk_app(Term::mk_app(Term::Const(match_fn), motive_term), scrutinee);
     for branch in branches {
-        result = Term::App(Box::new(result), Box::new(branch));
+        result = Term::mk_app(result, branch);
     }
 
     Ok(result)
@@ -320,8 +307,7 @@ fn specialize(
                 let rhs = if let Some(fvar) = fvar {
                     let mut ctor_app = Term::Const(ctor.clone());
                     for field_fvar in &field_fvars {
-                        ctor_app =
-                            Term::App(Box::new(ctor_app), Box::new(Term::FVar(field_fvar.clone())));
+                        ctor_app = Term::mk_app(ctor_app, Term::FVar(field_fvar.clone()));
                     }
                     subst::replace_fvar(&row.rhs, fvar, &ctor_app)
                 } else {

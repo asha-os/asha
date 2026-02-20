@@ -31,8 +31,9 @@ pub mod reduce;
 pub mod subst;
 pub mod unify;
 
+use core::slice;
+
 use alloc::{
-    boxed::Box,
     collections::btree_map::BTreeMap,
     format,
     string::{String, ToString},
@@ -111,6 +112,12 @@ impl Namespace {
     }
 }
 
+impl Default for Namespace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The global elaboration environment.
 ///
 /// Holds all declarations produced during elaboration, externally-provided primitive
@@ -144,54 +151,42 @@ impl Environment {
         externals.insert(PRIM_FALSE, Term::Const(PRIM_BOOL));
         externals.insert(
             PRIM_FIN,
-            Term::Pi(
-                BinderInfo::Explicit,
-                Box::new(Term::Const(PRIM_NAT)),
-                Box::new(Term::type0()),
-            ),
+            Term::mk_pi(BinderInfo::Explicit, Term::Const(PRIM_NAT), Term::type0()),
         );
         externals.insert(
             PRIM_ARRAY,
-            Term::Pi(
+            Term::mk_pi(
                 BinderInfo::Explicit,
-                Box::new(Term::type0()),
-                Box::new(Term::Pi(
-                    BinderInfo::Explicit,
-                    Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::type0()),
-                )),
+                Term::type0(),
+                Term::mk_pi(BinderInfo::Explicit, Term::Const(PRIM_NAT), Term::type0()),
             ),
         );
         externals.insert(
             PRIM_IO,
-            Term::Pi(
-                BinderInfo::Explicit,
-                Box::new(Term::type0()),
-                Box::new(Term::type0()),
-            ),
+            Term::mk_pi(BinderInfo::Explicit, Term::type0(), Term::type0()),
         );
         externals.insert(
             PRIM_ADD_FN,
-            Term::Pi(
+            Term::mk_pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Const(PRIM_NAT)),
-                Box::new(Term::Pi(
+                Term::Const(PRIM_NAT),
+                Term::mk_pi(
                     BinderInfo::Explicit,
-                    Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::Const(PRIM_NAT)),
-                )),
+                    Term::Const(PRIM_NAT),
+                    Term::Const(PRIM_NAT),
+                ),
             ),
         );
         externals.insert(
             PRIM_GT_FN,
-            Term::Pi(
+            Term::mk_pi(
                 BinderInfo::Explicit,
-                Box::new(Term::Const(PRIM_NAT)),
-                Box::new(Term::Pi(
+                Term::Const(PRIM_NAT),
+                Term::mk_pi(
                     BinderInfo::Explicit,
-                    Box::new(Term::Const(PRIM_NAT)),
-                    Box::new(Term::Sort(Level::Zero)),
-                )),
+                    Term::Const(PRIM_NAT),
+                    Term::Sort(Level::Zero),
+                ),
             ),
         );
         let mut root_namespace = Namespace::new();
@@ -243,7 +238,7 @@ impl Environment {
         self.decls
             .get(qname)
             .map(|decl| (decl.name(), decl.type_()))
-            .or_else(|| self.externals.get_key_value(qname).map(|(n, t)| (n, t)))
+            .or_else(|| self.externals.get_key_value(qname))
     }
 
     /// Looks up an inductive type's metadata by its qualified name.
@@ -381,19 +376,18 @@ impl ElabState {
                 .and_then(|qn| self.env.lookup_type(qn));
         }
 
-        if !self.current_namespace.is_empty() {
-            if let Some(qn) = ns.resolve(&self.current_namespace, member) {
-                if let Some(result) = self.env.lookup_type(qn) {
-                    return Some(result);
-                }
-            }
+        if !self.current_namespace.is_empty()
+            && let Some(qn) = ns.resolve(&self.current_namespace, member)
+            && let Some(result) = self.env.lookup_type(qn)
+        {
+            return Some(result);
         }
 
         for opened in &self.open_namespaces {
-            if let Some(qn) = ns.resolve(opened, member) {
-                if let Some(result) = self.env.lookup_type(qn) {
-                    return Some(result);
-                }
+            if let Some(qn) = ns.resolve(opened, member)
+                && let Some(result) = self.env.lookup_type(qn)
+            {
+                return Some(result);
             }
         }
 
@@ -480,7 +474,7 @@ impl ElabState {
     fn abstract_binders(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
-            term = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(term));
+            term = Term::mk_pi(info.clone(), ty.clone(), term);
         }
         term
     }
@@ -542,11 +536,7 @@ impl ElabState {
 
                 let mut lambda = body;
                 for (_, scrutinee_type) in scrutinee_types.iter().rev() {
-                    lambda = Term::Lam(
-                        BinderInfo::Explicit,
-                        Box::new(scrutinee_type.clone()),
-                        Box::new(lambda),
-                    );
+                    lambda = Term::mk_lam(BinderInfo::Explicit, scrutinee_type.clone(), lambda);
                 }
                 lambda
             }
@@ -585,16 +575,16 @@ impl ElabState {
             (term, inferred_type)
         };
 
-        if let Some(expected) = expected_type {
-            if !self.unify(&inferred_type, expected) {
-                self.errors.push(ElabError::new(
-                    err::ElabErrorKind::TypeMismatch {
-                        expected: expected.clone(),
-                        found: inferred_type,
-                    },
-                    syntax.span(),
-                ));
-            }
+        if let Some(expected) = expected_type
+            && !self.unify(&inferred_type, expected)
+        {
+            self.errors.push(ElabError::new(
+                err::ElabErrorKind::TypeMismatch {
+                    expected: expected.clone(),
+                    found: inferred_type,
+                },
+                syntax.span(),
+            ));
         }
 
         term
@@ -608,10 +598,10 @@ impl ElabState {
             SyntaxExpr::Var {
                 namespace, member, ..
             } => {
-                if namespace.is_empty() {
-                    if let Some(decl) = self.lctx.lookup_name(member) {
-                        return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
-                    }
+                if namespace.is_empty()
+                    && let Some(decl) = self.lctx.lookup_name(member)
+                {
+                    return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
 
                 if let Some((name, type_)) = self.resolve_name(namespace, member) {
@@ -626,7 +616,7 @@ impl ElabState {
             }
             SyntaxExpr::Constructor { name, .. } if name == "Type" => (
                 Term::type0(),
-                Term::Sort(Level::Succ(Box::new(Level::type0()))),
+                Term::Sort(Level::Succ(Level::type0().boxed())),
             ),
             SyntaxExpr::Constructor { name, .. } if name == "Prop" => {
                 (Term::Sort(Level::Zero), Term::type0())
@@ -662,33 +652,25 @@ impl ElabState {
                 };
                 let elems_len = elems.len() as u64;
 
-                let array_type = Term::App(
-                    Box::new(Term::App(
-                        Box::new(Term::Const(PRIM_ARRAY)),
-                        Box::new(elem_type.clone()),
-                    )),
-                    Box::new(Term::Lit(Literal::Nat(elems_len))),
+                let array_type = Term::mk_app(
+                    Term::mk_app(Term::Const(PRIM_ARRAY), elem_type.clone()),
+                    Term::Lit(Literal::Nat(elems_len)),
                 );
                 let mut result = Term::Const(PRIM_ARRAY_NIL);
-                let mut current_length = 0;
                 let mut elems = elems.clone();
                 elems.reverse();
-                for elem in elems {
+                for (current_length, elem) in elems.into_iter().enumerate() {
                     let elaborated_elem = self.elaborate_term(&elem, Some(&elem_type));
-                    result = Term::App(
-                        Box::new(Term::App(
-                            Box::new(Term::App(
-                                Box::new(Term::App(
-                                    Box::new(Term::Const(PRIM_ARRAY_CONS)),
-                                    Box::new(elem_type.clone()),
-                                )),
-                                Box::new(Term::Lit(Literal::Nat(current_length))),
-                            )),
-                            Box::new(elaborated_elem),
-                        )),
-                        Box::new(result),
+                    result = Term::mk_app(
+                        Term::mk_app(
+                            Term::mk_app(
+                                Term::mk_app(Term::Const(PRIM_ARRAY_CONS), elem_type.clone()),
+                                Term::Lit(Literal::Nat(current_length as u64)),
+                            ),
+                            elaborated_elem,
+                        ),
+                        result,
                     );
-                    current_length += 1;
                 }
                 (result, array_type)
             }
@@ -742,10 +724,7 @@ impl ElabState {
                             self.erroneous_term()
                         }
                     };
-                    let term = Term::App(
-                        Box::new(Term::App(Box::new(var_term), Box::new(arg1))),
-                        Box::new(arg2),
-                    );
+                    let term = Term::mk_app(Term::mk_app(var_term, arg1), arg2);
                     (term, return_type)
                 } else {
                     self.errors.push(ElabError::new(
@@ -755,7 +734,7 @@ impl ElabState {
                         )),
                         *span,
                     ));
-                    return (self.erroneous_term(), self.erroneous_term());
+                    (self.erroneous_term(), self.erroneous_term())
                 }
             }
             SyntaxExpr::App { fun, arg, .. } => self.elaborate_app(syntax, fun, arg),
@@ -765,7 +744,7 @@ impl ElabState {
                 if let Some(record_name) = head_const(&normalized_value_type) {
                     let namespace = record_name.display().unwrap().to_string();
                     if let Some((proj_fn_name, proj_fn_type)) =
-                        self.resolve_name(&[namespace.clone()], field)
+                        self.resolve_name(slice::from_ref(&namespace), field)
                     {
                         let proj_fn_term = Term::Const(proj_fn_name.clone());
                         let (mut term, fn_type) = self.insert_implicit_args_until(
@@ -776,7 +755,7 @@ impl ElabState {
                         match fn_type {
                             Term::Pi(_, _, body_ty) => {
                                 let return_type = subst::instantiate(&body_ty, &elaborated_value);
-                                term = Term::App(Box::new(term), Box::new(elaborated_value));
+                                term = Term::mk_app(term, elaborated_value);
                                 (term, return_type)
                             }
                             _ => {
@@ -810,10 +789,10 @@ impl ElabState {
                 let elaborated_param_type = self.elaborate_term(param_type, None);
                 let elaborated_return_type = self.elaborate_term(return_type, None);
                 (
-                    Term::Pi(
+                    Term::mk_pi(
                         BinderInfo::Explicit,
-                        Box::new(elaborated_param_type.clone()),
-                        Box::new(elaborated_return_type.clone()),
+                        elaborated_param_type,
+                        elaborated_return_type,
                     ),
                     Term::type0(),
                 )
@@ -826,10 +805,9 @@ impl ElabState {
                 let mut result_type = body_type;
                 for (fvar, info, ty) in binder_fvars.iter().rev() {
                     term = subst::abstract_fvar(&term, fvar.clone());
-                    term = Term::Lam(info.clone(), Box::new(ty.clone()), Box::new(term));
+                    term = Term::mk_lam(info.clone(), ty.clone(), term);
                     result_type = subst::abstract_fvar(&result_type, fvar.clone());
-                    result_type =
-                        Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(result_type));
+                    result_type = Term::mk_pi(info.clone(), ty.clone(), result_type);
                 }
                 self.lctx = saved_lctx;
                 (term, result_type)
@@ -867,7 +845,7 @@ impl ElabState {
                 Term::Pi(info, param_ty, body_ty) if info != &stop_at => {
                     let mvar = self.fresh_mvar(*param_ty.clone());
                     fn_type = subst::instantiate(body_ty, &mvar);
-                    term = Term::App(Box::new(term), Box::new(mvar));
+                    term = Term::mk_app(term, mvar);
                 }
                 _ => break,
             };
@@ -892,17 +870,14 @@ impl ElabState {
             Term::Pi(_info, param_ty, body_ty) => {
                 let elaborated_arg = self.elaborate_term(arg, Some(&param_ty));
                 let return_type = subst::instantiate(&body_ty, &elaborated_arg);
-                (
-                    Term::App(Box::new(term), Box::new(elaborated_arg)),
-                    return_type,
-                )
+                (Term::mk_app(term, elaborated_arg), return_type)
             }
             u => {
                 self.errors.push(ElabError::new(
                     ElabErrorKind::NotAFunction(u),
                     syntax.span(),
                 ));
-                return (self.erroneous_term(), self.erroneous_term());
+                (self.erroneous_term(), self.erroneous_term())
             }
         }
     }
@@ -941,17 +916,11 @@ impl ElabState {
 
         let mut constructor_type = Term::Const(record_name.clone());
         for (fvar, _, _) in &binder_fvars {
-            constructor_type = Term::App(
-                Box::new(constructor_type),
-                Box::new(Term::FVar(fvar.clone())),
-            );
+            constructor_type = Term::mk_app(constructor_type, Term::FVar(fvar.clone()));
         }
         for (_, _, field_type) in field_data.iter().rev() {
-            constructor_type = Term::Pi(
-                BinderInfo::Explicit,
-                Box::new(field_type.clone()),
-                Box::new(constructor_type),
-            );
+            constructor_type =
+                Term::mk_pi(BinderInfo::Explicit, field_type.clone(), constructor_type);
         }
         let constructor_type = Self::abstract_binders(&binder_fvars, constructor_type);
         let constructor = self.register_constructor("new", constructor_type, &mut child_ns, span);
@@ -1000,10 +969,7 @@ impl ElabState {
         } else {
             let mut current = &mut self.env.root_namespace;
             for segment in &self.current_namespace {
-                current = current
-                    .children
-                    .entry(segment.clone())
-                    .or_insert_with(Namespace::new);
+                current = current.children.entry(segment.clone()).or_default();
             }
             current
         };
@@ -1209,7 +1175,7 @@ impl ElabState {
             self.lctx = saved_lctx;
             constructor_data.push((ctor_name, constructor_type));
         }
-        return constructor_data;
+        constructor_data
     }
 
     /// Elaborates a typeclass declaration.
@@ -1233,10 +1199,7 @@ impl ElabState {
         self.register_inductive_type(name_str, &name, &binder_fvars, Term::type0(), span);
         let mut constructor_type = Term::Const(name.clone());
         for (fvar, _, _) in &binder_fvars {
-            constructor_type = Term::App(
-                Box::new(constructor_type),
-                Box::new(Term::FVar(fvar.clone())),
-            );
+            constructor_type = Term::mk_app(constructor_type, Term::FVar(fvar.clone()));
         }
         for member in members.iter().rev() {
             let field_display_name = member.name.clone();
@@ -1245,13 +1208,12 @@ impl ElabState {
 
             let mut applied_class = Term::Const(name.clone());
             for (fvar, _, _) in &binder_fvars {
-                applied_class =
-                    Term::App(Box::new(applied_class), Box::new(Term::FVar(fvar.clone())));
+                applied_class = Term::mk_app(applied_class, Term::FVar(fvar.clone()));
             }
-            let wrapped_type = Term::Pi(
+            let wrapped_type = Term::mk_pi(
                 BinderInfo::InstanceImplicit,
-                Box::new(applied_class),
-                Box::new(field_type.clone()),
+                applied_class,
+                field_type.clone(),
             );
             let wrapped_type = Self::abstract_binders(&binder_fvars, wrapped_type);
             // todo: make this a def
@@ -1263,11 +1225,7 @@ impl ElabState {
             self.env.decls.insert(field_name.clone(), field_def);
             child_ns.decls.insert(field_display_name, field_name);
 
-            constructor_type = Term::Pi(
-                BinderInfo::Explicit,
-                Box::new(field_type),
-                Box::new(constructor_type),
-            );
+            constructor_type = Term::mk_pi(BinderInfo::Explicit, field_type, constructor_type);
         }
 
         let constructor_type = Self::abstract_binders(&binder_fvars, constructor_type);
@@ -1425,10 +1383,10 @@ impl ElabState {
         constructor_names: &[QualifiedName],
         constructors_types: &[Term],
     ) -> Term {
-        let motive_type = Term::Pi(
+        let motive_type = Term::mk_pi(
             BinderInfo::Explicit,
-            Box::new(Term::Const(inductive_name.clone())),
-            Box::new(Term::type0()),
+            Term::Const(inductive_name.clone()),
+            Term::type0(),
         );
         let (motive_fvar, _) = self.fresh_fvar("_motive".into(), motive_type.clone());
         let motive = Term::FVar(motive_fvar.clone());
@@ -1448,35 +1406,24 @@ impl ElabState {
             branch_types.push(branch_type);
         }
 
-        let mut result = Term::App(
-            Box::new(motive.clone()),
-            Box::new(Term::FVar(scrutinee_fvar.clone())),
-        );
+        let mut result = Term::mk_app(motive.clone(), Term::FVar(scrutinee_fvar.clone()));
 
         for branch_type in branch_types.iter().rev() {
-            result = Term::Pi(
-                BinderInfo::Explicit,
-                Box::new(branch_type.clone()),
-                Box::new(result),
-            );
+            result = Term::mk_pi(BinderInfo::Explicit, branch_type.clone(), result);
         }
 
         result = subst::abstract_fvar(&result, scrutinee_fvar);
-        result = Term::Pi(
+        result = Term::mk_pi(
             BinderInfo::Explicit,
-            Box::new(Term::Const(inductive_name.clone())),
-            Box::new(result),
+            Term::Const(inductive_name.clone()),
+            result,
         );
 
         result = subst::abstract_fvar(&result, motive_fvar);
-        result = Term::Pi(
-            BinderInfo::Explicit,
-            Box::new(motive_type),
-            Box::new(result),
-        );
+        result = Term::mk_pi(BinderInfo::Explicit, motive_type, result);
 
         for (_, info, ty) in binder_fvars.iter().rev() {
-            result = Term::Pi(info.clone(), Box::new(ty.clone()), Box::new(result));
+            result = Term::mk_pi(info.clone(), ty.clone(), result);
         }
 
         result
@@ -1516,25 +1463,22 @@ impl ElabState {
 
         let mut ctor_app = Term::Const(ctor_name.clone());
         for i in 0..num_fields {
-            ctor_app = Term::App(
-                Box::new(ctor_app),
-                Box::new(Term::BVar(num_ihs + num_fields - 1 - i)),
-            );
+            ctor_app = Term::mk_app(ctor_app, Term::BVar(num_ihs + num_fields - 1 - i));
         }
 
-        let mut result = Term::App(Box::new(motive.clone()), Box::new(ctor_app));
+        let mut result = Term::mk_app(motive.clone(), ctor_app);
 
         // Wrap IH binders (k is current binders, field_idx is the position of the recursive field in the constructor type)
         for (k, &field_idx) in recursive_fields.iter().enumerate().rev() {
             // The field sits at depth: k + (num_fields - 1 - field_idx)
             let field_ref = Term::BVar(k + num_fields - 1 - field_idx);
-            let ih_ty = Term::App(Box::new(motive.clone()), Box::new(field_ref));
-            result = Term::Pi(BinderInfo::Explicit, Box::new(ih_ty), Box::new(result));
+            let ih_ty = Term::mk_app(motive.clone(), field_ref);
+            result = Term::mk_pi(BinderInfo::Explicit, ih_ty, result);
         }
 
         // Wrap field binders
         for (info, field_type) in field_binders.iter().rev() {
-            result = Term::Pi(info.clone(), Box::new(field_type.clone()), Box::new(result));
+            result = Term::mk_pi(info.clone(), field_type.clone(), result);
         }
         result
     }
@@ -1555,20 +1499,19 @@ impl ElabState {
 
         let mut applied_record = Term::Const(record_name.clone());
         for (fvar, _, _) in binder_fvars {
-            applied_record =
-                Term::App(Box::new(applied_record), Box::new(Term::FVar(fvar.clone())));
+            applied_record = Term::mk_app(applied_record, Term::FVar(fvar.clone()));
         }
 
         let mut branch = Term::BVar(num_fields - 1 - field_index);
         for ft in all_field_types.iter().rev() {
-            branch = Term::Lam(BinderInfo::Explicit, Box::new(ft.clone()), Box::new(branch));
+            branch = Term::mk_lam(BinderInfo::Explicit, ft.clone(), branch);
         }
 
         // Build the motive: λ (_ : R params) => field_type
-        let motive = Term::Lam(
+        let motive = Term::mk_lam(
             BinderInfo::Explicit,
-            Box::new(applied_record.clone()),
-            Box::new(field_type.clone()),
+            applied_record.clone(),
+            field_type.clone(),
         );
 
         // Scrutinee is the free variable for the record argument
@@ -1576,37 +1519,26 @@ impl ElabState {
         let scrutinee = Term::FVar(scrutinee_fvar.clone());
 
         // Build: match_fn motive scrutinee branch
-        let body = Term::App(
-            Box::new(Term::App(
-                Box::new(Term::App(
-                    Box::new(Term::Const(match_fn.clone())),
-                    Box::new(motive),
-                )),
-                Box::new(scrutinee),
-            )),
-            Box::new(branch),
+        let body = Term::mk_app(
+            Term::mk_app(
+                Term::mk_app(Term::Const(match_fn.clone()), motive),
+                scrutinee,
+            ),
+            branch,
         );
 
         // Wrap in λ (x : R params) => body
         let value = subst::abstract_fvar(&body, scrutinee_fvar.clone());
-        let value = Term::Lam(
-            BinderInfo::Explicit,
-            Box::new(applied_record.clone()),
-            Box::new(value),
-        );
+        let value = Term::mk_lam(BinderInfo::Explicit, applied_record.clone(), value);
 
         let mut value = value;
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             value = subst::abstract_fvar(&value, fvar.clone());
-            value = Term::Lam(info.clone(), Box::new(ty.clone()), Box::new(value));
+            value = Term::mk_lam(info.clone(), ty.clone(), value);
         }
 
         // Build the type: {params} -> R params -> field_type
-        let proj_type = Term::Pi(
-            BinderInfo::Explicit,
-            Box::new(applied_record),
-            Box::new(field_type.clone()),
-        );
+        let proj_type = Term::mk_pi(BinderInfo::Explicit, applied_record, field_type.clone());
         let proj_type = Self::abstract_binders(binder_fvars, proj_type);
 
         Declaration::Definition {

@@ -72,7 +72,7 @@ fn qualified_name_parser<'a>()
         just_token(TokenKind::UpperIdentifier),
     ));
 
-    let qualified = ident
+    ident
         .clone()
         .then(
             just_token(TokenKind::DoubleColon)
@@ -103,9 +103,7 @@ fn qualified_name_parser<'a>()
                     span,
                 }
             }
-        });
-
-    qualified
+        })
 }
 
 pub fn parse<'a>(
@@ -203,7 +201,7 @@ fn def_parser<'a>(
             name: lexeme_to_string(name.lexeme),
             binders,
             return_type: ret_type,
-            body: body,
+            body,
         })
 }
 

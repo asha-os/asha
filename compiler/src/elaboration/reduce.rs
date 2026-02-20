@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-
 use crate::{
     elaboration::{ElabState, subst},
     module::name::QualifiedName,
@@ -17,7 +15,7 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
             let f = whnf(state, f);
             match &f {
                 Term::Lam(_, _, body) => whnf(state, &subst::instantiate(body, arg)),
-                _ => Term::App(Box::new(f), arg.clone()),
+                _ => Term::mk_app(f, *arg.clone()),
             }
         }
 

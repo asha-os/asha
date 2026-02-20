@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-
 use crate::{
     elaboration::{ElabState, reduce::whnf},
     module::unique::Unique,
@@ -16,8 +14,8 @@ pub fn is_def_eq(state: &mut ElabState, a: &Term, b: &Term) -> bool {
         return true;
     }
 
-    let a = instantiate_mvars(state, &a);
-    let b = instantiate_mvars(state, &b);
+    let a = instantiate_mvars(state, a);
+    let b = instantiate_mvars(state, b);
 
     if structural_eq(&a, &b) {
         return true;
@@ -120,46 +118,43 @@ fn instantiate_mvars(state: &ElabState, term: &Term) -> Term {
             }
         }
         Term::Unit | Term::Const(_) | Term::BVar(_) | Term::FVar(_) | Term::Lit(_) => term.clone(),
-        Term::Sort(l) => Term::Sort(instantiate_mvars_level(state, l)),
-        Term::App(f, a) => Term::App(
-            Box::new(instantiate_mvars(state, f)),
-            Box::new(instantiate_mvars(state, a)),
-        ),
-        Term::Lam(info, ty, body) => Term::Lam(
+        Term::Sort(l) => Term::Sort(instantiate_mvars_level(l)),
+        Term::App(f, a) => Term::mk_app(instantiate_mvars(state, f), instantiate_mvars(state, a)),
+        Term::Lam(info, ty, body) => Term::mk_lam(
             info.clone(),
-            Box::new(instantiate_mvars(state, ty)),
-            Box::new(instantiate_mvars(state, body)),
+            instantiate_mvars(state, ty),
+            instantiate_mvars(state, body),
         ),
-        Term::Pi(info, ty, body) => Term::Pi(
+        Term::Pi(info, ty, body) => Term::mk_pi(
             info.clone(),
-            Box::new(instantiate_mvars(state, ty)),
-            Box::new(instantiate_mvars(state, body)),
+            instantiate_mvars(state, ty),
+            instantiate_mvars(state, body),
         ),
-        Term::Sigma(info, ty, body) => Term::Sigma(
+        Term::Sigma(info, ty, body) => Term::mk_sigma(
             info.clone(),
-            Box::new(instantiate_mvars(state, ty)),
-            Box::new(instantiate_mvars(state, body)),
+            instantiate_mvars(state, ty),
+            instantiate_mvars(state, body),
         ),
-        Term::Let(ty, val, body) => Term::Let(
-            Box::new(instantiate_mvars(state, ty)),
-            Box::new(instantiate_mvars(state, val)),
-            Box::new(instantiate_mvars(state, body)),
+        Term::Let(ty, val, body) => Term::mk_let(
+            instantiate_mvars(state, ty),
+            instantiate_mvars(state, val),
+            instantiate_mvars(state, body),
         ),
     }
 }
 
 /// Instantiates assigned metavariables within universe levels.
-fn instantiate_mvars_level(state: &ElabState, level: &Level) -> Level {
+fn instantiate_mvars_level(level: &Level) -> Level {
     match level {
         Level::Zero => Level::Zero,
-        Level::Succ(l) => Level::Succ(Box::new(instantiate_mvars_level(state, l))),
+        Level::Succ(l) => Level::Succ(instantiate_mvars_level(l).boxed()),
         Level::Max(l1, l2) => Level::Max(
-            Box::new(instantiate_mvars_level(state, l1)),
-            Box::new(instantiate_mvars_level(state, l2)),
+            instantiate_mvars_level(l1).boxed(),
+            instantiate_mvars_level(l2).boxed(),
         ),
         Level::IMax(l1, l2) => Level::IMax(
-            Box::new(instantiate_mvars_level(state, l1)),
-            Box::new(instantiate_mvars_level(state, l2)),
+            instantiate_mvars_level(l1).boxed(),
+            instantiate_mvars_level(l2).boxed(),
         ),
         Level::MVar(u) => {
             // todo: create their table
@@ -186,7 +181,7 @@ fn try_assign_mvar(state: &mut ElabState, a: &Term, b: &Term) -> bool {
     }
 
     state.mctx.assign(mvar_a, b.clone());
-    return true;
+    true
 }
 
 /// Checks whether `mvar` occurs anywhere inside `term`. Used as the occurs check

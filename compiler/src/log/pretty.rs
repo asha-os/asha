@@ -13,7 +13,7 @@ use crate::{
 
 impl Display for Environment {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        for (_, decl) in &self.decls {
+        for decl in self.decls.values() {
             writeln!(f, "{}", decl)?;
         }
         Ok(())

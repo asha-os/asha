@@ -132,3 +132,15 @@ impl MetavarContext {
         self.decls.iter().find(|d| d.mvar == mvar)
     }
 }
+
+impl Default for LocalContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for MetavarContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}

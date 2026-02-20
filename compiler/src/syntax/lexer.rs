@@ -192,27 +192,27 @@ impl<'a> Iterator for Lexer<'a> {
                 self.cursor.advance(1);
                 if self.cursor.byte_offset < source.len() {
                     let remaining = &source[self.cursor.byte_offset..];
-                    if let Some(c) = decode_utf8_char(remaining) {
-                        if is_ident_continue(c) {
-                            while self.cursor.byte_offset < source.len() {
-                                let remaining = &source[self.cursor.byte_offset..];
-                                if let Some(c) = decode_utf8_char(remaining) {
-                                    if is_ident_continue(c) {
-                                        self.cursor.advance_char(c);
-                                    } else {
-                                        break;
-                                    }
+                    if let Some(c) = decode_utf8_char(remaining)
+                        && is_ident_continue(c)
+                    {
+                        while self.cursor.byte_offset < source.len() {
+                            let remaining = &source[self.cursor.byte_offset..];
+                            if let Some(c) = decode_utf8_char(remaining) {
+                                if is_ident_continue(c) {
+                                    self.cursor.advance_char(c);
                                 } else {
                                     break;
                                 }
+                            } else {
+                                break;
                             }
-                            let lexeme = &source[start..self.cursor.byte_offset];
-                            return Some(Ok(Token {
-                                kind: TokenKind::LowerIdentifier,
-                                lexeme,
-                                span: self.cursor.span_from(start),
-                            }));
                         }
+                        let lexeme = &source[start..self.cursor.byte_offset];
+                        return Some(Ok(Token {
+                            kind: TokenKind::LowerIdentifier,
+                            lexeme,
+                            span: self.cursor.span_from(start),
+                        }));
                     }
                 }
                 Some(Ok(Token {
