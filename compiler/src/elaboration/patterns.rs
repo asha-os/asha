@@ -1,11 +1,12 @@
 use alloc::{boxed::Box, vec::Vec};
+use api::println;
 
 use crate::{
     elaboration::{
-        Environment,
+        ElabState,
         err::{ElabError, ElabErrorKind},
         reduce::{head_const, is_recursive_field},
-        subst,
+        subst, unify,
     },
     module::{
         name::QualifiedName,
@@ -24,7 +25,7 @@ pub enum Pattern {
         fields: Vec<Pattern>,
         type_: Term,
     },
-    Literal(Literal),
+    Lit(Literal),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,31 +76,44 @@ impl MatchProblem {
 
 /// Compiles a pattern match problem into a term that performs the pattern matching.
 pub fn compile(
-    env: &Environment,
-    gen_: &mut UniqueGen,
+    state: &mut ElabState,
     problem: MatchProblem,
     span: Span,
 ) -> Result<Term, ElabError> {
+    if problem.rows.is_empty() {
+        return Err(ElabError::new(
+            ElabErrorKind::NonExhaustiveMatch(None),
+            span,
+        ));
+    }
     if problem.scrutinees.is_empty() {
         return Ok(problem.rows[0].rhs.clone());
     }
     let col = pick_column(&problem);
     // If the column is all variables, we can eliminate it and compile the smaller problem.
     if is_all_variables(&problem, col) {
-        return compile(env, gen_, all_variables_elimination(problem, col), span);
+        return compile(state, all_variables_elimination(problem, col), span);
     }
 
     // Otherwise, we split on constructors
     let type_ = &problem.scrutinees[col].type_;
     let inductive = head_const(type_)
-        .and_then(|name| env.lookup_inductive(name))
+        .and_then(|name| state.env.lookup_inductive(name))
         .ok_or_else(|| ElabError::new(ElabErrorKind::NotInductive(type_.clone()), span))?;
 
     let scrutinee = problem.scrutinees[col].term.clone();
     let num_params = inductive.num_params;
     let ctors = inductive.constructors.clone();
+    let inductive_name = inductive.name.clone();
+    let match_fn = inductive.match_fn.clone();
+    let _ = inductive;
 
-    let type_args = extract_type_args(type_, num_params);
+    let all_args = extract_all_args(type_);
+    let param_args = all_args
+        .iter()
+        .take(num_params)
+        .cloned()
+        .collect::<Vec<_>>();
 
     let scrutinee_type = problem.scrutinees[col].type_.clone();
     let motive_term = Term::Lam(
@@ -110,30 +124,45 @@ pub fn compile(
 
     let mut branches = Vec::new();
     for ctor_name in &ctors {
-        let ctor_type = env.lookup(ctor_name).unwrap().type_().clone();
-        let field_types = extract_field_types(&ctor_type, num_params, &type_args);
-        let arity = field_types.len();
+        let ctor_type = state.env.lookup(ctor_name).unwrap().type_().clone();
+        let ctor_return_args = extract_return_type_args(&ctor_type, num_params, &param_args);
 
-        let (sub_problem, field_fvars) =
-            specialize(gen_, &problem, col, ctor_name, arity, &field_types);
+        let saved_mctx = state.mctx.clone();
+        let possible = ctor_return_args.len() == all_args.len()
+            && ctor_return_args
+                .iter()
+                .zip(all_args.iter())
+                .all(|(a, b)| unify::is_def_eq(state, a, b));
+        state.mctx = saved_mctx;
+        println!("ctor {:?} return args: {:?}", ctor_name, ctor_return_args);
+        println!("scrutinee args: {:?}", all_args);
+        println!("possible: {}", possible);
 
-        if sub_problem.rows.is_empty() {
-            return Err(ElabError::new(
-                ElabErrorKind::NonExhaustiveMatch(Some(Term::Const(ctor_name.clone()))),
-                span,
-            ));
+        if !possible {
+            continue;
         }
 
-        let branch_body = compile(env, gen_, sub_problem, span)?;
+        let field_types = extract_field_types(&ctor_type, num_params, &param_args);
+        let arity = field_types.len();
+
+        let (sub_problem, field_fvars) = specialize(
+            &mut state.gen_,
+            &problem,
+            col,
+            ctor_name,
+            arity,
+            &field_types,
+        );
+
+        let branch_body = compile(state, sub_problem, span)?;
 
         // Abstract field fvars and wrap with lambdas
         let mut result = branch_body;
 
         // First, wrap IH lambdas
-        let inductive_name = &inductive.name;
         for (fvar, field_type) in field_fvars.iter().rev().zip(field_types.iter().rev()) {
-            if is_recursive_field(field_type, inductive_name) {
-                let ih_fvar = gen_.fresh_unnamed();
+            if is_recursive_field(field_type, &inductive_name) {
+                let ih_fvar = state.gen_.fresh_unnamed();
 
                 // Replace recursive calls on this field with the IH fvar
                 if let Some(ref rec_fn) = problem.match_fn {
@@ -168,7 +197,6 @@ pub fn compile(
         branches.push(result);
     }
 
-    let match_fn = inductive.match_fn.clone();
     let mut result = Term::App(
         Box::new(Term::App(
             Box::new(Term::Const(match_fn)),
@@ -183,16 +211,14 @@ pub fn compile(
     Ok(result)
 }
 
-/// Extracts the type arguments applied to an inductive .
-fn extract_type_args(scrutinee_type: &Term, num_params: usize) -> Vec<Term> {
+fn extract_all_args(ty: &Term) -> Vec<Term> {
     let mut args = Vec::new();
-    let mut current = scrutinee_type.clone();
+    let mut current = ty.clone();
     while let Term::App(f, a) = current {
         args.push(*a);
         current = *f;
     }
     args.reverse();
-    args.truncate(num_params);
     args
 }
 
@@ -216,6 +242,28 @@ fn extract_field_types(ctor_type: &Term, num_params: usize, type_args: &[Term]) 
         current = *body;
     }
     field_types
+}
+
+/// Extracts the return type arguments from a constructor's Pi type
+fn extract_return_type_args(
+    ctor_type: &Term,
+    num_params: usize,
+    param_args: &[Term],
+) -> Vec<Term> {
+    let mut current = ctor_type.clone();
+    for i in 0..num_params {
+        if let Term::Pi(_, _, body) = current {
+            current = if i < param_args.len() {
+                subst::instantiate(&body, &param_args[i])
+            } else {
+                *body
+            };
+        }
+    }
+    while let Term::Pi(_, _, body) = current {
+        current = *body;
+    }
+    extract_all_args(&current)
 }
 
 /// Specializes the match problem for a specific constructor.

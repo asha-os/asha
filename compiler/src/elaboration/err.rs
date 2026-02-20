@@ -58,6 +58,11 @@ impl Display for ElabError {
             ElabErrorKind::NotAConstructorType(term) => {
                 write!(f, "not a constructor type: '{}'", term)
             }
+            ElabErrorKind::ImpossiblePattern { expected, found } => write!(
+                f,
+                "impossible pattern: expected '{}', found '{}'",
+                expected, found
+            ),
         }
     }
 }
@@ -75,6 +80,7 @@ pub enum ElabErrorKind {
     NonExhaustiveMatch(Option<Term>),
     NotInductive(Term),
     NotAConstructorType(Term),
+    ImpossiblePattern { expected: Term, found: Term },
 }
 
 impl miette::StdError for ElabError {}

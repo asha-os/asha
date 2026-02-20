@@ -80,7 +80,7 @@ pub struct MetavarDecl {
     pub lctx: LocalContext,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Represents the metavariable context, which consists of a list of metavariable declarations and a mapping from metavariables to their assigned values (if any)
 pub struct MetavarContext {
     /// The list of metavariable declarations in this context. The last declaration is the most recently added one.

@@ -1,0 +1,17 @@
+inductive Nat {
+    zero : Nat,
+    succ : Nat -> Nat
+}
+
+inductive Option (a : Type) {
+    none : Option a,
+    some : a -> Option a
+}
+
+inductive Array (a : Type) (n : Nat) {
+    nil : Array a Nat::zero,
+    cons : a -> Array a n -> Array a (Nat::succ n)
+}
+
+def head {a : Type} {n : Nat} : Array a (Nat::succ n) -> Option a
+    | Array::cons x _ => Option::some x

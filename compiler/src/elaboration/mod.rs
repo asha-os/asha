@@ -133,8 +133,8 @@ impl Environment {
     /// Creates an environment pre-loaded with built-in primitive types and operations.
     ///
     /// Also populates the root namespace so these names are resolvable.
+    #[deprecated]
     pub fn pre_loaded(module_id: ModuleId) -> Self {
-        // todo: review
         let mut externals = BTreeMap::new();
         let inductives = BTreeMap::new();
         externals.insert(PRIM_NAT, Term::Sort(Level::type0()));
@@ -170,7 +170,6 @@ impl Environment {
                 Box::new(Term::Sort(Level::type0())),
             ),
         );
-        // todo: remove these
         externals.insert(
             PRIM_ADD_FN,
             Term::Pi(
@@ -340,6 +339,8 @@ impl ElabState {
     }
 
     /// Creates an elaboration state pre-loaded with built-in primitive types and operators.
+    #[deprecated]
+    #[allow(deprecated)]
     pub fn pre_loaded(module: ModuleId) -> Self {
         let mut state = Self::new(module);
         state.env = Environment::pre_loaded(state.env.module_id.clone());
@@ -1310,7 +1311,7 @@ impl ElabState {
             .collect::<Vec<_>>();
         let problem = MatchProblem::new(scrutinees, rows, expected_type, match_fn);
 
-        match patterns::compile(&self.env, &mut self.gen_, problem, span) {
+        match patterns::compile(self, problem, span) {
             Ok(term) => term,
             Err(err) => {
                 self.errors.push(err);
@@ -1370,9 +1371,9 @@ impl ElabState {
                 // to the expected type of the pattern
                 if !self.unify(&current_type, expected_type) {
                     self.errors.push(ElabError::new(
-                        ElabErrorKind::TypeMismatch {
+                        ElabErrorKind::ImpossiblePattern {
                             expected: expected_type.clone(),
-                            found: current_type,
+                            found: current_type.clone(),
                         },
                         *span,
                     ));
@@ -1395,6 +1396,7 @@ impl ElabState {
                 }
             }
             SyntaxPattern::Wildcard(_) => Pattern::Var(None),
+            SyntaxPattern::Lit(value, _) => Pattern::Lit(value.clone()),
             u => todo!("unsupported pattern: {:?}", u),
         }
     }
@@ -1608,7 +1610,7 @@ pub fn elaborate_file(
     module_id: ModuleId,
     tree: &SyntaxTree,
 ) -> Result<Environment, Vec<ElabError>> {
-    let mut state = ElabState::pre_loaded(module_id);
+    let mut state = ElabState::new(module_id);
 
     for decl in &tree.declarations {
         state.elaborate_declaration(decl);
