@@ -5,7 +5,7 @@ use crate::{
     elaboration::{
         ElabState,
         err::{ElabError, ElabErrorKind},
-        reduce::{head_const, is_recursive_field},
+        reduce::{head_const, is_recursive_field, whnf},
         subst, unify,
     },
     module::{
@@ -96,10 +96,15 @@ pub fn compile(
     }
 
     // Otherwise, we split on constructors
-    let type_ = &problem.scrutinees[col].type_;
-    let inductive = head_const(type_)
-        .and_then(|name| state.env.lookup_inductive(name))
+    let type_ = whnf(state, &problem.scrutinees[col].type_);
+    let inductive_name = head_const(&type_)
         .ok_or_else(|| ElabError::new(ElabErrorKind::NotInductive(type_.clone()), span))?;
+    let inductive = state.env.lookup_inductive(&inductive_name).ok_or_else(|| {
+        ElabError::new(
+            ElabErrorKind::UnknownInductive(inductive_name.clone()),
+            span,
+        )
+    })?;
 
     let scrutinee = problem.scrutinees[col].term.clone();
     let num_params = inductive.num_params;
@@ -108,7 +113,7 @@ pub fn compile(
     let match_fn = inductive.match_fn.clone();
     let _ = inductive;
 
-    let all_args = extract_all_args(type_);
+    let all_args = extract_all_args(&type_);
     let param_args = all_args
         .iter()
         .take(num_params)

@@ -13,5 +13,10 @@ inductive Array (a : Type) : Nat -> Type {
     cons {n : Nat} : a -> Array a n -> Array a (Nat::succ n)
 }
 
+alias ArrayTwo (a : Type) = Array a (Nat::succ (Nat::succ Nat::zero))
+
 def head {a : Type} {n : Nat} : Array a (Nat::succ n) -> Option a
+    | Array::cons x _ => Option::some x
+
+def head_array_two {a : Type} : ArrayTwo a -> Option a
     | Array::cons x _ => Option::some x

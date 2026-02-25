@@ -130,6 +130,8 @@ pub struct Environment {
     pub externals: BTreeMap<QualifiedName, Term>,
     /// All declarations elaborated in this module (definitions, constructors, etc.).
     pub decls: BTreeMap<QualifiedName, Declaration>,
+    /// All aliases, maps them to their elaborated values and types
+    pub aliases: BTreeMap<QualifiedName, (Term, Term)>,
     /// The root of the namespace tree for name resolution.
     pub root_namespace: Namespace,
     /// Metadata for inductive types. Used during pattern match elaboration.
@@ -221,6 +223,7 @@ impl Environment {
             module_id,
             externals,
             decls: BTreeMap::new(),
+            aliases: BTreeMap::new(),
             root_namespace,
             inductives,
         }
@@ -239,6 +242,12 @@ impl Environment {
             .get(qname)
             .map(|decl| (decl.name(), decl.type_()))
             .or_else(|| self.externals.get_key_value(qname))
+    }
+
+    /// Looks up an alias by its [`QualifiedName`].
+    /// Returns the elaborated value and its type.
+    pub fn lookup_alias(&self, qname: &QualifiedName) -> Option<(&Term, &Term)> {
+        self.aliases.get(qname).map(|(value, type_)| (value, type_))
     }
 
     /// Looks up an inductive type's metadata by its qualified name.
@@ -321,6 +330,7 @@ impl ElabState {
                 module_id: module.clone(),
                 externals: BTreeMap::new(),
                 decls: BTreeMap::new(),
+                aliases: BTreeMap::new(),
                 root_namespace: Namespace::new(),
                 inductives: BTreeMap::new(),
             },
@@ -395,6 +405,39 @@ impl ElabState {
             .and_then(|qn| self.env.lookup_type(qn))
     }
 
+    fn resolve_alias(
+        &self,
+        namespace: &[String],
+        member: &str,
+    ) -> Option<(&QualifiedName, &Term, &Term)> {
+        let ns = &self.env.root_namespace;
+
+        if !namespace.is_empty() {
+            return ns
+                .resolve(namespace, member)
+                .and_then(|qn| self.env.lookup_alias(qn).map(|(val, ty)| (qn, val, ty)));
+        }
+
+        if !self.current_namespace.is_empty() {
+            if let Some(qn) = ns.resolve(&self.current_namespace, member)
+                && let Some((val, ty)) = self.env.lookup_alias(&qn)
+            {
+                return Some((qn, val, ty));
+            }
+        }
+
+        for opened in &self.open_namespaces {
+            if let Some(qn) = ns.resolve(opened, member)
+                && let Some((val, ty)) = self.env.lookup_alias(&qn)
+            {
+                return Some((qn, val, ty));
+            }
+        }
+
+        ns.lookup_decl(member)
+            .and_then(|qn| self.env.lookup_alias(qn).map(|(val, ty)| (qn, val, ty)))
+    }
+
     /// Dispatches a top-level declaration to the appropriate elaboration handler.
     pub fn elaborate_declaration(&mut self, decl: &SyntaxTreeDeclaration) {
         match decl {
@@ -432,6 +475,13 @@ impl ElabState {
             SyntaxTreeDeclaration::Instance { .. } => {
                 // todo: implement instance elaboration
             }
+            SyntaxTreeDeclaration::Alias {
+                name,
+                binders,
+                type_ann,
+                value,
+                span,
+            } => self.elaborate_alias(name, binders, type_ann, value, *span),
             SyntaxTreeDeclaration::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", &term);
@@ -475,6 +525,14 @@ impl ElabState {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
             term = Term::mk_pi(info.clone(), ty.clone(), term);
+        }
+        term
+    }
+
+    fn abstract_binders_lam(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
+        for (fvar, info, ty) in binder_fvars.iter().rev() {
+            term = subst::abstract_fvar(&term, fvar.clone());
+            term = Term::mk_lam(info.clone(), ty.clone(), term);
         }
         term
     }
@@ -626,6 +684,10 @@ impl ElabState {
             } => {
                 if let Some((name, type_)) = self.resolve_name(namespace, name) {
                     return (Term::Const(name.clone()), type_.clone());
+                }
+
+                if let Some((_, val, type_)) = self.resolve_alias(namespace, name) {
+                    return (val.clone(), type_.clone());
                 }
 
                 self.errors.push(ElabError::new(
@@ -1547,6 +1609,51 @@ impl ElabState {
             value,
             span,
         }
+    }
+
+    fn elaborate_alias(
+        &mut self,
+        name: &str,
+        binders: &[SyntaxBinder],
+        type_ann: &Option<SyntaxExpr>,
+        value: &SyntaxExpr,
+        span: Span,
+    ) {
+        let name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let saved_lctx = self.lctx.clone();
+        let binder_fvars = self.elaborate_binders(binders);
+
+        let elaborated_type_ann = if let Some(type_ann) = type_ann {
+            let ty = self.elaborate_term(type_ann, None);
+            Some(Self::abstract_binders(&binder_fvars, ty))
+        } else {
+            None
+        };
+        let (elaborated_value, value_type) = self.elaborate_term_inner(value);
+        if let Some(type_ann) = &elaborated_type_ann {
+            if !self.unify(&type_ann, &value_type) {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::TypeMismatch {
+                        expected: type_ann.clone(),
+                        found: value_type.clone(),
+                    },
+                    span,
+                ));
+            }
+        }
+
+        let final_type = if let Some(type_ann) = elaborated_type_ann {
+            type_ann
+        } else {
+            Self::abstract_binders(&binder_fvars, value_type.clone())
+        };
+        let final_value = Self::abstract_binders_lam(&binder_fvars, elaborated_value.clone());
+        self.register_in_namespace(name.to_string().as_str(), name.clone());
+        self.env
+            .aliases
+            .insert(name.clone(), (final_value, final_type));
+
+        self.lctx = saved_lctx;
     }
 }
 

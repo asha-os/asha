@@ -111,6 +111,7 @@ impl<'a> Iterator for Lexer<'a> {
                     b"let" => TokenKind::Let,
                     b"in" => TokenKind::In,
                     b"eval" => TokenKind::Eval,
+                    b"alias" => TokenKind::Alias,
                     b"record" => TokenKind::Record,
                     b"extern" => TokenKind::Extern,
                     b"inductive" => TokenKind::Inductive,

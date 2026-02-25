@@ -131,6 +131,7 @@ fn program<'a>() -> impl Parser<'a, ParserInput<'a>, SyntaxTree, ParserExtra<'a>
         inductive_parser(expr.clone()),
         class_parser(expr.clone()),
         instance_parser(expr.clone()),
+        alias_parser(expr.clone()),
     ));
 
     expr.define(expr_impl(expr.clone()));
@@ -366,6 +367,32 @@ fn instance_parser<'a>(
                 }
             },
         )
+}
+
+fn alias_parser<'a>(
+    expr: impl Parser<'a, ParserInput<'a>, Expr, ParserExtra<'a>> + Clone,
+) -> impl Parser<'a, ParserInput<'a>, Decl, ParserExtra<'a>> {
+    just_token(TokenKind::Alias)
+        .ignore_then(just_token(TokenKind::UpperIdentifier))
+        .then(
+            binder(expr.clone())
+                .repeated()
+                .collect::<Vec<_>>()
+                .then(
+                    just_token(TokenKind::Colon)
+                        .ignore_then(expr.clone())
+                        .or_not(),
+                )
+                .then_ignore(just_token(TokenKind::Equal))
+                .then(expr),
+        )
+        .map(|(alias_tok, ((binders, type_ann), target))| Decl::Alias {
+            span: spanning(&alias_tok, &target),
+            name: lexeme_to_string(alias_tok.lexeme),
+            binders,
+            type_ann,
+            value: target,
+        })
 }
 
 fn inductive_parser<'a>(

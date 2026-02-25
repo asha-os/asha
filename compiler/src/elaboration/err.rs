@@ -1,8 +1,7 @@
 use core::fmt::Display;
 
 use crate::{
-    spine::Term,
-    syntax::{Span, tree::SyntaxExpr},
+    module::name::QualifiedName, spine::Term, syntax::{Span, tree::SyntaxExpr}
 };
 use alloc::{
     boxed::Box,
@@ -54,6 +53,9 @@ impl Display for ElabError {
             }
             ElabErrorKind::NotInductive(term) => {
                 write!(f, "not an inductive type: '{}'", term)
+            },
+            ElabErrorKind::UnknownInductive(name) => {
+                write!(f, "unknown inductive type '{}'", name)
             }
             ElabErrorKind::NotAConstructorType(term) => {
                 write!(f, "not a constructor type: '{}'", term)
@@ -79,6 +81,7 @@ pub enum ElabErrorKind {
     TypeExpected(Term),
     NonExhaustiveMatch(Option<Term>),
     NotInductive(Term),
+    UnknownInductive(QualifiedName),
     NotAConstructorType(Term),
     ImpossiblePattern { expected: Term, found: Term },
 }

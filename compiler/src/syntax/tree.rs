@@ -69,6 +69,13 @@ pub enum SyntaxTreeDeclaration {
         expr: SyntaxExpr,
         span: Span,
     },
+    Alias {
+        name: String,
+        binders: Vec<SyntaxBinder>,
+        type_ann: Option<SyntaxExpr>,
+        value: SyntaxExpr,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +298,7 @@ impl Spanned for SyntaxTreeDeclaration {
             SyntaxTreeDeclaration::Extern { span, .. } => *span,
             SyntaxTreeDeclaration::Inductive { span, .. } => *span,
             SyntaxTreeDeclaration::Eval { span, .. } => *span,
+            SyntaxTreeDeclaration::Alias { span, .. } => *span,
         }
     }
 }
