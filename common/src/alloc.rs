@@ -1,5 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout};
 
+#[derive(Default)]
 pub struct Allocator;
 
 impl Allocator {

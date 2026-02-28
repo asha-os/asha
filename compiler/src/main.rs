@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![warn(clippy::pedantic)]
 
 use alloc::string::{String, ToString};
 use api::{

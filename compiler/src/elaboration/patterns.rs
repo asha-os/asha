@@ -43,6 +43,7 @@ pub struct PatternRow {
 }
 
 impl PatternRow {
+    #[must_use] 
     pub fn new(patterns: Vec<Pattern>, rhs: Term) -> Self {
         Self { patterns, rhs }
     }
@@ -59,6 +60,7 @@ pub struct MatchProblem {
 }
 
 impl MatchProblem {
+    #[must_use] 
     pub fn new(
         scrutinees: Vec<Scrutinee>,
         rows: Vec<PatternRow>,
@@ -99,7 +101,7 @@ pub fn compile(
     let type_ = whnf(state, &problem.scrutinees[col].type_);
     let inductive_name = head_const(&type_)
         .ok_or_else(|| ElabError::new(ElabErrorKind::NotInductive(type_.clone()), span))?;
-    let inductive = state.env.lookup_inductive(&inductive_name).ok_or_else(|| {
+    let inductive = state.env.lookup_inductive(inductive_name).ok_or_else(|| {
         ElabError::new(
             ElabErrorKind::UnknownInductive(inductive_name.clone()),
             span,
@@ -354,7 +356,7 @@ fn pick_column(_problem: &MatchProblem) -> usize {
 fn is_all_variables(problem: &MatchProblem, col: usize) -> bool {
     for row in &problem.rows {
         match &row.patterns[col] {
-            Pattern::Var(_) => continue,
+            Pattern::Var(_) => {},
             _ => return false,
         }
     }

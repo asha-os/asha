@@ -24,6 +24,7 @@ pub struct LocalContext {
 }
 
 impl LocalContext {
+    #[must_use] 
     pub fn new() -> Self {
         Self { decls: Vec::new() }
     }
@@ -57,11 +58,13 @@ impl LocalContext {
     }
 
     /// Looks up a local declaration by its unique variable. Returns None if no such declaration exists in the context.
-    pub fn lookup(&self, fvar: Unique) -> Option<&LocalDecl> {
-        self.decls.iter().find(|d| d.fvar == fvar)
+    #[must_use] 
+    pub fn lookup(&self, fvar: &Unique) -> Option<&LocalDecl> {
+        self.decls.iter().find(|d| &d.fvar == fvar)
     }
 
     /// Looks up a local declaration by its display name. Returns None if no such declaration exists in the context. If multiple declarations have the same display name, the most recently added one is returned.
+    #[must_use] 
     pub fn lookup_name(&self, name: &str) -> Option<&LocalDecl> {
         self.decls
             .iter()
@@ -90,6 +93,7 @@ pub struct MetavarContext {
 }
 
 impl MetavarContext {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             decls: Vec::new(),
@@ -118,18 +122,21 @@ impl MetavarContext {
     }
 
     /// Checks if a metavariable is assigned. Returns true if the metavariable has an assigned value, false otherwise.
-    pub fn is_assigned(&self, mvar: Unique) -> bool {
-        self.assignments.contains_key(&mvar)
+    #[must_use] 
+    pub fn is_assigned(&self, mvar: &Unique) -> bool {
+        self.assignments.contains_key(mvar)
     }
 
     /// Gets the assigned value of a metavariable. Returns None if the metavariable is not assigned.
-    pub fn get_assignment(&self, mvar: Unique) -> Option<&Term> {
-        self.assignments.get(&mvar)
+    #[must_use] 
+    pub fn get_assignment(&self, mvar: &Unique) -> Option<&Term> {
+        self.assignments.get(mvar)
     }
 
     /// Looks up a metavariable declaration by its unique identifier. Returns None if no such declaration exists in the context.
-    pub fn lookup_decl(&self, mvar: Unique) -> Option<&MetavarDecl> {
-        self.decls.iter().find(|d| d.mvar == mvar)
+    #[must_use] 
+    pub fn lookup_decl(&self, mvar: &Unique) -> Option<&MetavarDecl> {
+        self.decls.iter().find(|d| &d.mvar == mvar)
     }
 }
 

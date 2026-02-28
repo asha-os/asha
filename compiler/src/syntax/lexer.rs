@@ -26,6 +26,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    #[must_use] 
     pub fn new(source_file: &'a SourceFile<'a>) -> Self {
         Self {
             source_file,
@@ -46,6 +47,7 @@ impl<'a> Lexer<'a> {
         index
     }
 
+    #[must_use] 
     pub fn eoi_span(&self) -> Span {
         Span::empty(self.cursor.file, self.cursor.byte_offset)
     }
@@ -134,9 +136,8 @@ impl<'a> Iterator for Lexer<'a> {
                     if c == '"' {
                         self.cursor.advance(1);
                         break;
-                    } else {
-                        self.cursor.advance(1);
                     }
+                    self.cursor.advance(1);
                 }
                 let lexeme = &source[start..self.cursor.byte_offset];
 

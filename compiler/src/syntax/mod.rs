@@ -19,10 +19,12 @@ pub struct Span {
 }
 
 impl Span {
+    #[must_use] 
     pub fn new(file: usize, start: usize, end: usize) -> Self {
         Self { file, start, end }
     }
 
+    #[must_use] 
     pub fn empty(file: usize, offset: usize) -> Self {
         Self {
             file,
@@ -33,6 +35,7 @@ impl Span {
 }
 
 impl SourceFile<'_> {
+    #[must_use] 
     pub fn line_col(&self, byte_offset: usize) -> (usize, usize) {
         let mut line = 1;
         let mut col = 1;
@@ -57,6 +60,7 @@ pub struct LexerCursor {
 }
 
 impl LexerCursor {
+    #[must_use] 
     pub fn new(file: usize) -> Self {
         Self {
             file,
@@ -72,6 +76,7 @@ impl LexerCursor {
         self.byte_offset += c.len_utf8();
     }
 
+    #[must_use] 
     pub fn span_from(&self, start: usize) -> Span {
         Span::new(self.file, start, self.byte_offset)
     }
@@ -84,9 +89,7 @@ pub trait Spanned {
 fn spanning<A: Spanned, B: Spanned>(a: &A, b: &B) -> Span {
     let span_a = a.span();
     let span_b = b.span();
-    if span_a.file != span_b.file {
-        panic!("Cannot span across different files");
-    }
+    assert!(span_a.file == span_b.file, "Cannot span across different files");
     Span::new(
         span_a.file,
         span_a.start.min(span_b.start),

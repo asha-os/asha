@@ -241,7 +241,7 @@ pub struct MatchArm {
 pub struct SyntaxAttribute {
     pub name: String,
     pub args: Vec<SyntaxExpr>,
-    pub span: Span,    
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,23 +254,23 @@ pub enum SyntaxBinder {
 impl Spanned for SyntaxExpr {
     fn span(&self) -> Span {
         match self {
-            SyntaxExpr::Var { span, .. } => *span,
-            SyntaxExpr::Constructor { span, .. } => *span,
-            SyntaxExpr::App { span, .. } => *span,
-            SyntaxExpr::Lambda { span, .. } => *span,
-            SyntaxExpr::Let { span, .. } => *span,
-            SyntaxExpr::Lit { span, .. } => *span,
-            SyntaxExpr::Tuple { span, .. } => *span,
-            SyntaxExpr::Proj { span, .. } => *span,
-            SyntaxExpr::Hole(span) => *span,
-            SyntaxExpr::Arrow { span, .. } => *span,
-            SyntaxExpr::Array { span, .. } => *span,
-            SyntaxExpr::Pi { span, .. } => *span,
-            SyntaxExpr::Sigma { span, .. } => *span,
-            SyntaxExpr::Unit(span) => *span,
-            SyntaxExpr::InfixOp { span, .. } => *span,
-            SyntaxExpr::RecordLiteral { span, .. } => *span,
-            SyntaxExpr::Match { span, .. } => *span,
+            SyntaxExpr::Var { span, .. }
+            | SyntaxExpr::Constructor { span, .. }
+            | SyntaxExpr::App { span, .. }
+            | SyntaxExpr::Lambda { span, .. }
+            | SyntaxExpr::Let { span, .. }
+            | SyntaxExpr::Lit { span, .. }
+            | SyntaxExpr::Tuple { span, .. }
+            | SyntaxExpr::Proj { span, .. }
+            | SyntaxExpr::Hole(span)
+            | SyntaxExpr::Arrow { span, .. }
+            | SyntaxExpr::Array { span, .. }
+            | SyntaxExpr::Pi { span, .. }
+            | SyntaxExpr::Sigma { span, .. }
+            | SyntaxExpr::Unit(span)
+            | SyntaxExpr::InfixOp { span, .. }
+            | SyntaxExpr::RecordLiteral { span, .. }
+            | SyntaxExpr::Match { span, .. } => *span,
         }
     }
 }
@@ -278,9 +278,9 @@ impl Spanned for SyntaxExpr {
 impl Spanned for SyntaxBinder {
     fn span(&self) -> Span {
         match self {
-            SyntaxBinder::Explicit(span, ..) => *span,
-            SyntaxBinder::Implicit(span, ..) => *span,
-            SyntaxBinder::Instance(span, ..) => *span,
+            SyntaxBinder::Explicit(span, ..)
+            | SyntaxBinder::Implicit(span, ..)
+            | SyntaxBinder::Instance(span, ..) => *span,
         }
     }
 }
@@ -288,13 +288,13 @@ impl Spanned for SyntaxBinder {
 impl Spanned for SyntaxPattern {
     fn span(&self) -> Span {
         match self {
-            SyntaxPattern::Var(_, span) => *span,
-            SyntaxPattern::Constructor { span, .. } => *span,
-            SyntaxPattern::Lit(_, span) => *span,
-            SyntaxPattern::Wildcard(span) => *span,
-            SyntaxPattern::Tuple { span, .. } => *span,
-            SyntaxPattern::As { span, .. } => *span,
-            SyntaxPattern::Or(_, span) => *span,
+            SyntaxPattern::Var(_, span)
+            | SyntaxPattern::Constructor { span, .. }
+            | SyntaxPattern::Lit(_, span)
+            | SyntaxPattern::Wildcard(span)
+            | SyntaxPattern::Tuple { span, .. }
+            | SyntaxPattern::As { span, .. }
+            | SyntaxPattern::Or(_, span) => *span,
         }
     }
 }
@@ -302,14 +302,14 @@ impl Spanned for SyntaxPattern {
 impl Spanned for SyntaxTreeDeclaration {
     fn span(&self) -> Span {
         match self {
-            SyntaxTreeDeclaration::Def { span, .. } => *span,
-            SyntaxTreeDeclaration::Class { span, .. } => *span,
-            SyntaxTreeDeclaration::Instance { span, .. } => *span,
-            SyntaxTreeDeclaration::Record { span, .. } => *span,
-            SyntaxTreeDeclaration::Extern { span, .. } => *span,
-            SyntaxTreeDeclaration::Inductive { span, .. } => *span,
-            SyntaxTreeDeclaration::Eval { span, .. } => *span,
-            SyntaxTreeDeclaration::Alias { span, .. } => *span,
+            SyntaxTreeDeclaration::Def { span, .. }
+            | SyntaxTreeDeclaration::Class { span, .. }
+            | SyntaxTreeDeclaration::Instance { span, .. }
+            | SyntaxTreeDeclaration::Record { span, .. }
+            | SyntaxTreeDeclaration::Extern { span, .. }
+            | SyntaxTreeDeclaration::Inductive { span, .. }
+            | SyntaxTreeDeclaration::Eval { span, .. }
+            | SyntaxTreeDeclaration::Alias { span, .. } => *span,
         }
     }
 }

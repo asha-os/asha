@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt;
+use core::fmt::{self, Write};
 
 use miette::{Diagnostic, LabeledSpan, Severity, SourceSpan, StdError};
 
@@ -36,7 +36,7 @@ impl fmt::Display for LexError {
             LexErrorKind::UnexpectedEndOfInput => write!(f, "unexpected end of input"),
             LexErrorKind::InvalidToken => write!(f, "invalid token"),
             LexErrorKind::UnterminatedString => write!(f, "unterminated string literal"),
-            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{}`", c),
+            LexErrorKind::UnexpectedChar(c) => write!(f, "unexpected character `{c}`"),
         }
     }
 }
@@ -70,8 +70,7 @@ impl Diagnostic for LexError {
             LexErrorKind::UnexpectedChar(c) => {
                 if c.is_ascii_punctuation() {
                     return Some(Box::new(alloc::format!(
-                        "`{}` is not a recognized operator or delimiter",
-                        c
+                        "`{c}` is not a recognized operator or delimiter"
                     )));
                 }
                 None
@@ -176,7 +175,7 @@ fn format_expected(expected: &[TokenKind]) -> String {
                 if i == expected.len() - 1 {
                     s.push_str("or ");
                 }
-                s.push_str(&alloc::format!("{}", tok));
+                write!(s, "{tok}").unwrap();
                 if i < expected.len() - 2 {
                     s.push_str(", ");
                 } else if i == expected.len() - 2 {
@@ -193,7 +192,7 @@ impl fmt::Display for ParseError {
         match &self.kind {
             ParseErrorKind::UnexpectedToken => {
                 if let Some(found) = &self.found {
-                    write!(f, "unexpected {}", found)
+                    write!(f, "unexpected {found}")
                 } else {
                     write!(f, "unexpected token")
                 }
@@ -202,7 +201,7 @@ impl fmt::Display for ParseError {
                 write!(f, "unexpected end of input")
             }
             ParseErrorKind::UnclosedDelimiter { open, .. } => {
-                write!(f, "unclosed {}", open)
+                write!(f, "unclosed {open}")
             }
         }
     }
@@ -227,27 +226,27 @@ impl Diagnostic for ParseError {
     fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
         match &self.kind {
             ParseErrorKind::UnexpectedToken => {
-                if !self.expected.is_empty() {
+                if self.expected.is_empty() {
+                    None
+                } else {
                     Some(Box::new(alloc::format!(
                         "expected {}",
                         format_expected(&self.expected)
                     )))
-                } else {
-                    None
                 }
             }
             ParseErrorKind::UnexpectedEndOfInput => {
-                if !self.expected.is_empty() {
+                if self.expected.is_empty() {
+                    Some(Box::new("the input ended unexpectedly"))
+                } else {
                     Some(Box::new(alloc::format!(
                         "expected {} before end of input",
                         format_expected(&self.expected)
                     )))
-                } else {
-                    Some(Box::new("the input ended unexpectedly"))
                 }
             }
             ParseErrorKind::UnclosedDelimiter { expected_close, .. } => Some(Box::new(
-                alloc::format!("add {} to close the delimiter", expected_close),
+                alloc::format!("add {expected_close} to close the delimiter"),
             )),
         }
     }
@@ -255,15 +254,15 @@ impl Diagnostic for ParseError {
     fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
         let label = match &self.kind {
             ParseErrorKind::UnexpectedToken => {
-                if !self.expected.is_empty() {
-                    alloc::format!("expected {}", format_expected(&self.expected))
-                } else {
+                if self.expected.is_empty() {
                     String::from("unexpected")
+                } else {
+                    alloc::format!("expected {}", format_expected(&self.expected))
                 }
             }
             ParseErrorKind::UnexpectedEndOfInput => String::from("input ended here"),
             ParseErrorKind::UnclosedDelimiter { open, .. } => {
-                alloc::format!("this {} is never closed", open)
+                alloc::format!("this {open} is never closed")
             }
         };
         Some(Box::new(core::iter::once(LabeledSpan::new(

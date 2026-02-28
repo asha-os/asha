@@ -15,7 +15,7 @@ use crate::{
 impl Display for Environment {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         for decl in self.decls.values() {
-            writeln!(f, "{}", decl)?;
+            writeln!(f, "{decl}")?;
         }
         Ok(())
     }
@@ -45,46 +45,47 @@ impl Display for Term {
     }
 }
 
+#[must_use] 
 pub fn pretty_term(term: &Term) -> String {
     match term {
         Term::MVar(_) => "✸".into(),
-        Term::BVar(de_bruijn_index) => format!("b{}", de_bruijn_index),
+        Term::BVar(de_bruijn_index) => format!("b{de_bruijn_index}"),
         Term::FVar(unique) => unique.display_name.clone().map_or_else(
             || format!("f{}", unique.id),
-            |name| format!("'{}'", name),
+            |name| format!("'{name}'"),
         ),
         Term::Const(qname) => qname.display().unwrap().to_string(),
         Term::App(func, arg) => format!("{} ({})", pretty_term(func), pretty_term(arg)),
         Term::Pi(binder_info, param, body) => {
-            let binder_str = binder_surrounding(binder_info, pretty_term(param));
+            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
             format!("{} -> {}", binder_str, pretty_term(body))
         }
         Term::Lam(binder_info, param, body) => {
-            let binder_str = binder_surrounding(binder_info, pretty_term(param));
+            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
             format!("λ {}. {}", binder_str, pretty_term(body))
         }
         Term::Sigma(binder_info, param, body) => {
-            let binder_str = binder_surrounding(binder_info, pretty_term(param));
+            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
             format!("{} × {}", binder_str, pretty_term(body))
         }
-        Term::Sort(level) => format!("Type({})", level),
+        Term::Sort(level) => format!("Type({level})"),
         Term::Let(binding, value, body) => format!(
             "let {} = {} in {}",
             pretty_term(binding),
             pretty_term(value),
             pretty_term(body)
         ),
-        Term::Lit(lit) => format!("{:?}", lit),
+        Term::Lit(lit) => format!("{lit:?}"),
         Term::Unit => "()".to_string(),
     }
 }
 
-fn binder_surrounding(binder_info: &BinderInfo, str: String) -> String {
+fn binder_surrounding(binder_info: BinderInfo, str: &str) -> String {
     match binder_info {
-        BinderInfo::Explicit => format!("({})", str),
-        BinderInfo::Implicit => format!("{{{}}}", str),
-        BinderInfo::InstanceImplicit => format!("[{}]", str),
-        BinderInfo::StrictImplicit => format!("{{{{{}}}}}", str),
+        BinderInfo::Explicit => format!("({str})"),
+        BinderInfo::Implicit => format!("{{{str}}}"),
+        BinderInfo::InstanceImplicit => format!("[{str}]"),
+        BinderInfo::StrictImplicit => format!("{{{{{str}}}}}"),
     }
 }
 
@@ -103,10 +104,10 @@ impl Display for Level {
 impl Display for DisplayableLevel {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            DisplayableLevel::Nth(n) => write!(f, "{}", n),
-            DisplayableLevel::Max(l1, l2) => write!(f, "max({}, {})", l1, l2),
-            DisplayableLevel::IMax(l1, l2) => write!(f, "imax({}, {})", l1, l2),
-            DisplayableLevel::MVar(name) => write!(f, "m{}", name),
+            DisplayableLevel::Nth(n) => write!(f, "{n}"),
+            DisplayableLevel::Max(l1, l2) => write!(f, "max({l1}, {l2})"),
+            DisplayableLevel::IMax(l1, l2) => write!(f, "imax({l1}, {l2})"),
+            DisplayableLevel::MVar(name) => write!(f, "m{name}"),
         }
     }
 }

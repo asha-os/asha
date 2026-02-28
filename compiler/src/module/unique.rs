@@ -10,6 +10,7 @@ pub struct Unique {
 }
 
 impl Unique {
+    #[must_use] 
     pub const fn new(id: usize, module_id: ModuleId, display_name: Option<String>) -> Self {
         Self {
             id,
@@ -18,6 +19,7 @@ impl Unique {
         }
     }
 
+    #[must_use] 
     pub fn unnamed(id: usize, module_id: ModuleId) -> Self {
         Self {
             id,
@@ -53,10 +55,11 @@ impl Ord for Unique {
 #[derive(Debug)]
 pub struct UniqueGen {
     module_id: ModuleId,
-    next: u64,
+    next: usize,
 }
 
 impl UniqueGen {
+    #[must_use] 
     pub fn new(module_id: ModuleId) -> Self {
         Self { module_id, next: 0 }
     }
@@ -64,12 +67,12 @@ impl UniqueGen {
     pub fn fresh(&mut self, name: String) -> Unique {
         let id = self.next;
         self.next += 1;
-        Unique::new(id as usize, self.module_id.clone(), Some(name))
+        Unique::new(id, self.module_id.clone(), Some(name))
     }
 
     pub fn fresh_unnamed(&mut self) -> Unique {
         let id = self.next;
         self.next += 1;
-        Unique::unnamed(id as usize, self.module_id.clone())
+        Unique::unnamed(id, self.module_id.clone())
     }
 }

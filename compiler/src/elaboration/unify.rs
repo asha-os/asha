@@ -42,13 +42,9 @@ pub fn is_def_eq(state: &mut ElabState, a: &Term, b: &Term) -> bool {
         (Term::App(f1, a1), Term::App(f2, a2)) => {
             is_def_eq(state, f1, f2) && is_def_eq(state, a1, a2)
         }
-        (Term::Lam(_, ty1, b1), Term::Lam(_, ty2, b2)) => {
-            is_def_eq(state, ty1, ty2) && is_def_eq(state, b1, b2)
-        }
-        (Term::Pi(_, ty1, b1), Term::Pi(_, ty2, b2)) => {
-            is_def_eq(state, ty1, ty2) && is_def_eq(state, b1, b2)
-        }
-        (Term::Sigma(_, ty1, b1), Term::Sigma(_, ty2, b2)) => {
+        (Term::Lam(_, ty1, b1), Term::Lam(_, ty2, b2))
+        | (Term::Pi(_, ty1, b1), Term::Pi(_, ty2, b2))
+        | (Term::Sigma(_, ty1, b1), Term::Sigma(_, ty2, b2)) => {
             is_def_eq(state, ty1, ty2) && is_def_eq(state, b1, b2)
         }
         (Term::Let(ty1, v1, b1), Term::Let(ty2, v2, b2)) => {
@@ -64,19 +60,14 @@ pub fn is_def_eq(state: &mut ElabState, a: &Term, b: &Term) -> bool {
 fn structural_eq(a: &Term, b: &Term) -> bool {
     match (a, b) {
         (Term::BVar(i), Term::BVar(j)) => i == j,
-        (Term::FVar(u1), Term::FVar(u2)) => u1 == u2,
-        (Term::MVar(u1), Term::MVar(u2)) => u1 == u2,
+        (Term::FVar(u1), Term::FVar(u2)) | (Term::MVar(u1), Term::MVar(u2)) => u1 == u2,
         (Term::Lit(l1), Term::Lit(l2)) => l1 == l2,
         (Term::Sort(l1), Term::Sort(l2)) => structural_eq_level(l1, l2),
         (Term::App(f1, a1), Term::App(f2, a2)) => structural_eq(f1, f2) && structural_eq(a1, a2),
         (Term::Const(n1), Term::Const(n2)) => n1 == n2,
-        (Term::Lam(_, ty1, b1), Term::Lam(_, ty2, b2)) => {
-            structural_eq(ty1, ty2) && structural_eq(b1, b2)
-        }
-        (Term::Pi(_, ty1, b1), Term::Pi(_, ty2, b2)) => {
-            structural_eq(ty1, ty2) && structural_eq(b1, b2)
-        }
-        (Term::Sigma(_, ty1, b1), Term::Sigma(_, ty2, b2)) => {
+        (Term::Lam(_, ty1, b1), Term::Lam(_, ty2, b2))
+        | (Term::Pi(_, ty1, b1), Term::Pi(_, ty2, b2))
+        | (Term::Sigma(_, ty1, b1), Term::Sigma(_, ty2, b2)) => {
             structural_eq(ty1, ty2) && structural_eq(b1, b2)
         }
         (Term::Let(ty1, v1, b1), Term::Let(ty2, v2, b2)) => {
@@ -92,10 +83,7 @@ fn structural_eq_level(a: &Level, b: &Level) -> bool {
     match (a, b) {
         (Level::Zero, Level::Zero) => true,
         (Level::Succ(a), Level::Succ(b)) => structural_eq_level(a, b),
-        (Level::Max(a1, a2), Level::Max(b1, b2)) => {
-            structural_eq_level(a1, b1) && structural_eq_level(a2, b2)
-        }
-        (Level::IMax(a1, a2), Level::IMax(b1, b2)) => {
+        (Level::Max(a1, a2), Level::Max(b1, b2)) | (Level::IMax(a1, a2), Level::IMax(b1, b2)) => {
             structural_eq_level(a1, b1) && structural_eq_level(a2, b2)
         }
         (Level::MVar(u1), Level::MVar(u2)) => u1 == u2,
@@ -111,7 +99,7 @@ fn structural_eq_level(a: &Level, b: &Level) -> bool {
 fn instantiate_mvars(state: &ElabState, term: &Term) -> Term {
     match term {
         Term::MVar(u) => {
-            if let Some(val) = state.mctx.get_assignment(u.clone()) {
+            if let Some(val) = state.mctx.get_assignment(u) {
                 instantiate_mvars(state, val)
             } else {
                 term.clone()
@@ -121,17 +109,17 @@ fn instantiate_mvars(state: &ElabState, term: &Term) -> Term {
         Term::Sort(l) => Term::Sort(instantiate_mvars_level(l)),
         Term::App(f, a) => Term::mk_app(instantiate_mvars(state, f), instantiate_mvars(state, a)),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             instantiate_mvars(state, ty),
             instantiate_mvars(state, body),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             instantiate_mvars(state, ty),
             instantiate_mvars(state, body),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             instantiate_mvars(state, ty),
             instantiate_mvars(state, body),
         ),
@@ -172,11 +160,11 @@ fn try_assign_mvar(state: &mut ElabState, a: &Term, b: &Term) -> bool {
         _ => return false,
     };
 
-    if state.mctx.is_assigned(mvar_a.clone()) {
+    if state.mctx.is_assigned(&mvar_a) {
         return false;
     }
 
-    if occurs_in(mvar_a.clone(), b) {
+    if occurs_in(&mvar_a, b) {
         return false;
     }
 
@@ -186,32 +174,29 @@ fn try_assign_mvar(state: &mut ElabState, a: &Term, b: &Term) -> bool {
 
 /// Checks whether `mvar` occurs anywhere inside `term`. Used as the occurs check
 /// during metavariable assignment to prevent infinite types.
-fn occurs_in(mvar: Unique, term: &Term) -> bool {
+fn occurs_in(mvar: &Unique, term: &Term) -> bool {
     match term {
-        Term::MVar(u) => *u == mvar,
-        Term::BVar(_) => false,
-        Term::FVar(_) => false,
-        Term::Lit(_) => false,
-        Term::Const(_) => false,
-        Term::Unit => false,
+        Term::MVar(u) => u == mvar,
+        Term::BVar(_) | Term::FVar(_) | Term::Lit(_) | Term::Const(_) | Term::Unit => false,
         Term::Sort(l) => occurs_in_level(mvar, l),
-        Term::App(f, a) => occurs_in(mvar.clone(), f) || occurs_in(mvar, a),
-        Term::Lam(_, ty, body) => occurs_in(mvar.clone(), ty) || occurs_in(mvar, body),
-        Term::Pi(_, ty, body) => occurs_in(mvar.clone(), ty) || occurs_in(mvar, body),
-        Term::Sigma(_, ty, body) => occurs_in(mvar.clone(), ty) || occurs_in(mvar, body),
+        Term::App(f, a) => occurs_in(mvar, f) || occurs_in(mvar, a),
+        Term::Lam(_, ty, body) | Term::Pi(_, ty, body) | Term::Sigma(_, ty, body) => {
+            occurs_in(mvar, ty) || occurs_in(mvar, body)
+        }
         Term::Let(ty, val, body) => {
-            occurs_in(mvar.clone(), ty) || occurs_in(mvar.clone(), val) || occurs_in(mvar, body)
+            occurs_in(mvar, ty) || occurs_in(mvar, val) || occurs_in(mvar, body)
         }
     }
 }
 
 /// Occurs check for universe levels.
-fn occurs_in_level(mvar: Unique, level: &Level) -> bool {
+fn occurs_in_level(mvar: &Unique, level: &Level) -> bool {
     match level {
         Level::Zero => false,
         Level::Succ(l) => occurs_in_level(mvar, l),
-        Level::Max(l1, l2) => occurs_in_level(mvar.clone(), l1) || occurs_in_level(mvar, l2),
-        Level::IMax(l1, l2) => occurs_in_level(mvar.clone(), l1) || occurs_in_level(mvar, l2),
-        Level::MVar(u) => *u == mvar,
+        Level::Max(l1, l2) | Level::IMax(l1, l2) => {
+            occurs_in_level(mvar, l1) || occurs_in_level(mvar, l2)
+        }
+        Level::MVar(u) => u == mvar,
     }
 }

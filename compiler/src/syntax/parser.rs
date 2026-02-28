@@ -138,7 +138,7 @@ pub fn parse<'a>(
     let parser = program();
 
     let (output, errors) = parser.parse(input).into_output_errors();
-    let errors = errors.into_iter().map(rich_to_parse_error).collect();
+    let errors = errors.iter().map(rich_to_parse_error).collect();
 
     (output, errors)
 }
@@ -791,15 +791,13 @@ fn expr_atom<'a>(
     choice((named, number, string, hole, tuple_or_grouped, array))
 }
 
-fn rich_to_parse_error(err: Rich<'_, Token<'_>, Span>) -> ParseError {
+fn rich_to_parse_error(err: &Rich<'_, Token<'_>, Span>) -> ParseError {
     let span = *err.span();
     let found = err.found().map(|t| t.kind);
     let expected: Vec<TokenKind> = err
         .expected()
         .filter_map(|e| match e {
             chumsky::error::RichPattern::Token(t) => Some(t.into_inner().kind),
-            chumsky::error::RichPattern::Label(_) => None,
-            chumsky::error::RichPattern::EndOfInput => None,
             _ => None,
         })
         .collect();

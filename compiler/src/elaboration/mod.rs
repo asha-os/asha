@@ -78,6 +78,7 @@ pub struct Namespace {
 }
 
 impl Namespace {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             decls: BTreeMap::new(),
@@ -86,17 +87,20 @@ impl Namespace {
     }
 
     /// Looks up a declaration in this namespace by its display name.
+    #[must_use]
     pub fn lookup_decl(&self, name: &str) -> Option<&QualifiedName> {
         self.decls.get(name)
     }
 
     /// Returns a direct child namespace by name.
+    #[must_use]
     pub fn child(&self, name: &str) -> Option<&Namespace> {
         self.children.get(name)
     }
 
     /// Traverses a path of namespace segments, returning the namespace at the end.
     /// Returns `None` if any segment along the path does not exist.
+    #[must_use]
     pub fn walk(&self, path: &[String]) -> Option<&Namespace> {
         let mut current = self;
         for segment in path {
@@ -106,6 +110,7 @@ impl Namespace {
     }
 
     /// Resolves a qualified reference by walking the namespace `path` and then looking up `member`.
+    #[must_use]
     pub fn resolve(&self, path: &[String], member: &str) -> Option<&QualifiedName> {
         self.walk(path)?.lookup_decl(member)
     }
@@ -120,7 +125,14 @@ impl Default for Namespace {
 /// The registry of built-in primitive types, operations, and type class instances.
 pub struct LanguageItems(BTreeMap<String, QualifiedName>);
 
+impl Default for LanguageItems {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LanguageItems {
+    #[must_use]
     pub fn new() -> Self {
         Self(BTreeMap::new())
     }
@@ -129,14 +141,17 @@ impl LanguageItems {
         self.0.insert(name.to_string(), qname);
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&QualifiedName> {
         self.0.get(name)
     }
 
+    #[must_use]
     pub fn get_string(&self) -> Option<&QualifiedName> {
         self.get("string")
     }
 
+    #[must_use]
     pub fn get_nat(&self) -> Option<&QualifiedName> {
         self.get("nat")
     }
@@ -165,12 +180,14 @@ pub struct Environment {
 impl Environment {
     /// Looks up a declaration by its [`QualifiedName`]. Only searches module-local declarations,
     /// not externals.
+    #[must_use]
     pub fn lookup(&self, name: &QualifiedName) -> Option<&Declaration> {
         self.decls.get(name)
     }
 
     /// Looks up the type of a name, searching both module-local declarations and externals.
     /// Returns the canonical [`QualifiedName`] and its type.
+    #[must_use]
     pub fn lookup_type(&self, qname: &QualifiedName) -> Option<(&QualifiedName, &Term)> {
         self.decls
             .get(qname)
@@ -180,11 +197,13 @@ impl Environment {
 
     /// Looks up an alias by its [`QualifiedName`].
     /// Returns the elaborated value and its type.
+    #[must_use]
     pub fn lookup_alias(&self, qname: &QualifiedName) -> Option<(&Term, &Term)> {
         self.aliases.get(qname).map(|(value, type_)| (value, type_))
     }
 
     /// Looks up an inductive type's metadata by its qualified name.
+    #[must_use]
     pub fn lookup_inductive(&self, qname: &QualifiedName) -> Option<&InductiveMetadata> {
         self.inductives.get(qname)
     }
@@ -216,6 +235,7 @@ pub enum Declaration {
 
 impl Declaration {
     /// Returns the declaration's [`QualifiedName`].
+    #[must_use]
     pub fn name(&self) -> &QualifiedName {
         match self {
             Declaration::Definition { name, .. }
@@ -225,6 +245,7 @@ impl Declaration {
     }
 
     /// Returns the declaration's type.
+    #[must_use]
     pub fn type_(&self) -> &Term {
         match self {
             Declaration::Definition { type_, .. }
@@ -260,6 +281,7 @@ pub struct ElabState {
 
 impl ElabState {
     /// Creates a blank elaboration state with no pre-loaded primitives.
+    #[must_use]
     pub fn new(module: ModuleId) -> Self {
         Self {
             env: Environment {
@@ -345,17 +367,16 @@ impl ElabState {
                 .and_then(|qn| self.env.lookup_alias(qn).map(|(val, ty)| (qn, val, ty)));
         }
 
-        if !self.current_namespace.is_empty() {
-            if let Some(qn) = ns.resolve(&self.current_namespace, member)
-                && let Some((val, ty)) = self.env.lookup_alias(&qn)
-            {
-                return Some((qn, val, ty));
-            }
+        if !self.current_namespace.is_empty()
+            && let Some(qn) = ns.resolve(&self.current_namespace, member)
+            && let Some((val, ty)) = self.env.lookup_alias(qn)
+        {
+            return Some((qn, val, ty));
         }
 
         for opened in &self.open_namespaces {
             if let Some(qn) = ns.resolve(opened, member)
-                && let Some((val, ty)) = self.env.lookup_alias(&qn)
+                && let Some((val, ty)) = self.env.lookup_alias(qn)
             {
                 return Some((qn, val, ty));
             }
@@ -395,7 +416,14 @@ impl ElabState {
                 constructors,
                 span,
             } => {
-                self.elaborate_inductive(name, attributes, binders, index_type, constructors, *span)
+                self.elaborate_inductive(
+                    name,
+                    attributes,
+                    binders,
+                    index_type.as_ref(),
+                    constructors,
+                    *span,
+                );
             }
             SyntaxTreeDeclaration::Class {
                 attributes,
@@ -413,7 +441,7 @@ impl ElabState {
                 type_ann,
                 value,
                 span,
-            } => self.elaborate_alias(name, binders, type_ann, value, *span),
+            } => self.elaborate_alias(name, binders, type_ann.as_ref(), value, *span),
             SyntaxTreeDeclaration::Eval { expr, .. } => {
                 let term = self.elaborate_term(expr, None);
                 println!("Evaluated term: {:#?}", &term);
@@ -456,7 +484,7 @@ impl ElabState {
     fn abstract_binders(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
-            term = Term::mk_pi(info.clone(), ty.clone(), term);
+            term = Term::mk_pi(*info, ty.clone(), term);
         }
         term
     }
@@ -464,7 +492,7 @@ impl ElabState {
     fn abstract_binders_lam(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
-            term = Term::mk_lam(info.clone(), ty.clone(), term);
+            term = Term::mk_lam(*info, ty.clone(), term);
         }
         term
     }
@@ -726,23 +754,18 @@ impl ElabState {
                             proj_fn_type.clone(),
                             BinderInfo::InstanceImplicit,
                         );
-                        match fn_type {
-                            Term::Pi(_, _, body_ty) => {
-                                let return_type = subst::instantiate(&body_ty, &elaborated_value);
-                                term = Term::mk_app(term, elaborated_value);
-                                (term, return_type)
-                            }
-                            _ => {
-                                self.errors.push(ElabError::new(
-                                    ElabErrorKind::NotAFunction(fn_type),
-                                    *span,
-                                ));
-                                (self.erroneous_term(), self.erroneous_term())
-                            }
+                        if let Term::Pi(_, _, body_ty) = fn_type {
+                            let return_type = subst::instantiate(&body_ty, &elaborated_value);
+                            term = Term::mk_app(term, elaborated_value);
+                            (term, return_type)
+                        } else {
+                            self.errors
+                                .push(ElabError::new(ElabErrorKind::NotAFunction(fn_type), *span));
+                            (self.erroneous_term(), self.erroneous_term())
                         }
                     } else {
                         self.errors.push(ElabError::new(
-                            ElabErrorKind::UndefinedVariable(format!("{}::{}", namespace, field)),
+                            ElabErrorKind::UndefinedVariable(format!("{namespace}::{field}")),
                             *span,
                         ));
                         (self.erroneous_term(), self.erroneous_term())
@@ -779,9 +802,9 @@ impl ElabState {
                 let mut result_type = body_type;
                 for (fvar, info, ty) in binder_fvars.iter().rev() {
                     term = subst::abstract_fvar(&term, fvar.clone());
-                    term = Term::mk_lam(info.clone(), ty.clone(), term);
+                    term = Term::mk_lam(*info, ty.clone(), term);
                     result_type = subst::abstract_fvar(&result_type, fvar.clone());
-                    result_type = Term::mk_pi(info.clone(), ty.clone(), result_type);
+                    result_type = Term::mk_pi(*info, ty.clone(), result_type);
                 }
                 self.lctx = saved_lctx;
                 (term, result_type)
@@ -822,7 +845,7 @@ impl ElabState {
                     term = Term::mk_app(term, mvar);
                 }
                 _ => break,
-            };
+            }
         }
         (term, fn_type)
     }
@@ -991,7 +1014,7 @@ impl ElabState {
                 span,
             },
         );
-        self.optionally_register_lang_item(ind_name.clone(), attributes);
+        self.optionally_register_lang_item(ind_name, attributes);
         self.register_in_namespace(name, ind_name.clone());
     }
 
@@ -1077,7 +1100,7 @@ impl ElabState {
         name: &str,
         attributes: &[SyntaxAttribute],
         binders: &[SyntaxBinder],
-        index_type: &Option<SyntaxExpr>,
+        index_type: Option<&SyntaxExpr>,
         constructors: &[InductiveConstructor],
         span: Span,
     ) {
@@ -1125,7 +1148,7 @@ impl ElabState {
     ) -> Vec<(QualifiedName, Term)> {
         let mut constructor_data = Vec::new();
         for constructor in constructors {
-            let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.to_string()));
+            let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.clone()));
             let saved_lctx = self.lctx.clone();
             let ctor_binder_fvars = self.elaborate_binders(&constructor.binders);
 
@@ -1220,7 +1243,7 @@ impl ElabState {
                 span: member.span,
             };
             self.env.decls.insert(field_name.clone(), field_def);
-            self.optionally_register_lang_item(field_name.clone(), &member.attributes);
+            self.optionally_register_lang_item(&field_name, &member.attributes);
             child_ns.decls.insert(field_display_name, field_name);
 
             constructor_type = Term::mk_pi(BinderInfo::Explicit, field_type, constructor_type);
@@ -1317,19 +1340,16 @@ impl ElabState {
                 let mut current_type = reduce::whnf(self, &ctor_type);
                 let mut arg_types = Vec::new();
                 // Peel off Pi types for each argument in the pattern, collecting their types
-                for _ in args.iter() {
-                    match current_type {
-                        Term::Pi(_, param_ty, body_ty) => {
-                            arg_types.push(*param_ty);
-                            current_type = reduce::whnf(self, &body_ty);
-                        }
-                        _ => {
-                            self.errors.push(ElabError::new(
-                                ElabErrorKind::NotAConstructorType(current_type.clone()),
-                                *span,
-                            ));
-                            break;
-                        }
+                for _ in args {
+                    if let Term::Pi(_, param_ty, body_ty) = current_type {
+                        arg_types.push(*param_ty);
+                        current_type = reduce::whnf(self, &body_ty);
+                    } else {
+                        self.errors.push(ElabError::new(
+                            ElabErrorKind::NotAConstructorType(current_type.clone()),
+                            *span,
+                        ));
+                        break;
                     }
                 }
                 // Unify the innermost type (which is the constructor itself after all applications)
@@ -1421,7 +1441,7 @@ impl ElabState {
         result = Term::mk_pi(BinderInfo::Explicit, motive_type, result);
 
         for (_, info, ty) in binder_fvars.iter().rev() {
-            result = Term::mk_pi(info.clone(), ty.clone(), result);
+            result = Term::mk_pi(*info, ty.clone(), result);
         }
 
         result
@@ -1476,7 +1496,7 @@ impl ElabState {
 
         // Wrap field binders
         for (info, field_type) in field_binders.iter().rev() {
-            result = Term::mk_pi(info.clone(), field_type.clone(), result);
+            result = Term::mk_pi(*info, field_type.clone(), result);
         }
         result
     }
@@ -1532,7 +1552,7 @@ impl ElabState {
         let mut value = value;
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             value = subst::abstract_fvar(&value, fvar.clone());
-            value = Term::mk_lam(info.clone(), ty.clone(), value);
+            value = Term::mk_lam(*info, ty.clone(), value);
         }
 
         // Build the type: {params} -> R params -> field_type
@@ -1551,7 +1571,7 @@ impl ElabState {
         &mut self,
         name: &str,
         binders: &[SyntaxBinder],
-        type_ann: &Option<SyntaxExpr>,
+        type_ann: Option<&SyntaxExpr>,
         value: &SyntaxExpr,
         span: Span,
     ) {
@@ -1566,16 +1586,16 @@ impl ElabState {
             None
         };
         let (elaborated_value, value_type) = self.elaborate_term_inner(value);
-        if let Some(type_ann) = &elaborated_type_ann {
-            if !self.unify(&type_ann, &value_type) {
-                self.errors.push(ElabError::new(
-                    ElabErrorKind::TypeMismatch {
-                        expected: type_ann.clone(),
-                        found: value_type.clone(),
-                    },
-                    span,
-                ));
-            }
+        if let Some(type_ann) = &elaborated_type_ann
+            && !self.unify(type_ann, &value_type)
+        {
+            self.errors.push(ElabError::new(
+                ElabErrorKind::TypeMismatch {
+                    expected: type_ann.clone(),
+                    found: value_type.clone(),
+                },
+                span,
+            ));
         }
 
         let final_type = if let Some(type_ann) = elaborated_type_ann {
@@ -1608,7 +1628,7 @@ impl ElabState {
     /// Checks for a `#[wired_in("item_name")]` attribute and, if found, registers the given name as the implementation of that lang item
     fn optionally_register_lang_item(
         &mut self,
-        name: QualifiedName,
+        name: &QualifiedName,
         attributes: &[SyntaxAttribute],
     ) {
         for attr in attributes {
@@ -1641,26 +1661,23 @@ impl ElabState {
 
         for (arg, arg_ty) in args.into_iter().rev() {
             term = Term::mk_app(term, arg);
-            result_type = match result_type {
-                Term::Pi(_, param_ty, body_ty) => {
-                    if !self.unify(&param_ty, &arg_ty) {
-                        self.errors.push(ElabError::new(
-                            ElabErrorKind::TypeMismatch {
-                                expected: *param_ty.clone(),
-                                found: arg_ty.clone(),
-                            },
-                            span,
-                        ));
-                    }
-                    *body_ty
-                }
-                _ => {
+            result_type = if let Term::Pi(_, param_ty, body_ty) = result_type {
+                if !self.unify(&param_ty, &arg_ty) {
                     self.errors.push(ElabError::new(
-                        ElabErrorKind::NotAFunction(result_type.clone()),
+                        ElabErrorKind::TypeMismatch {
+                            expected: *param_ty.clone(),
+                            found: arg_ty.clone(),
+                        },
                         span,
                     ));
-                    return (self.erroneous_term(), self.erroneous_term());
                 }
+                *body_ty
+            } else {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::NotAFunction(result_type.clone()),
+                    span,
+                ));
+                return (self.erroneous_term(), self.erroneous_term());
             };
         }
 

@@ -10,6 +10,7 @@ use crate::{
 /// After substitution, all remaining bound variable indices above 0 are decremented
 /// by one (since one binder has been consumed), and free variables inside `replacement`
 /// are shifted up to account for the binding depth at the substitution site.
+#[must_use]
 pub fn instantiate(term: &Term, replacement: &Term) -> Term {
     instantiate_at(term, replacement, 0)
 }
@@ -18,15 +19,9 @@ pub fn instantiate(term: &Term, replacement: &Term) -> Term {
 /// traversed into. `BVar(depth)` is the target for substitution at each level.
 fn instantiate_at(term: &Term, replacement: &Term, depth: usize) -> Term {
     match term {
-        Term::BVar(i) => {
-            if *i == depth {
-                shift(replacement, depth)
-            } else if *i > depth {
-                Term::BVar(i - 1)
-            } else {
-                Term::BVar(*i)
-            }
-        }
+        Term::BVar(i) if *i == depth => shift(replacement, depth),
+        Term::BVar(i) if *i > depth => Term::BVar(i - 1),
+        Term::BVar(i) => Term::BVar(*i),
         Term::Unit
         | Term::Const(_)
         | Term::FVar(_)
@@ -38,17 +33,17 @@ fn instantiate_at(term: &Term, replacement: &Term, depth: usize) -> Term {
             instantiate_at(a, replacement, depth),
         ),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             instantiate_at(ty, replacement, depth),
             instantiate_at(body, replacement, depth + 1),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             instantiate_at(ty, replacement, depth),
             instantiate_at(body, replacement, depth + 1),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             instantiate_at(ty, replacement, depth),
             instantiate_at(body, replacement, depth + 1),
         ),
@@ -93,17 +88,17 @@ fn shift_at(term: &Term, amount: usize, depth: usize) -> Term {
 
         Term::App(f, a) => Term::mk_app(shift_at(f, amount, depth), shift_at(a, amount, depth)),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             shift_at(ty, amount, depth),
             shift_at(body, amount, depth + 1),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             shift_at(ty, amount, depth),
             shift_at(body, amount, depth + 1),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             shift_at(ty, amount, depth),
             shift_at(body, amount, depth + 1),
         ),
@@ -121,6 +116,7 @@ fn shift_at(term: &Term, amount: usize, depth: usize) -> Term {
 /// a term suitable for use as the body of a `Lam`, `Pi`, or `Sigma`. Existing bound
 /// variable indices at or above the current depth are shifted up by one to make room
 /// for the new binder.
+#[must_use]
 pub fn abstract_fvar(term: &Term, fvar: Unique) -> Term {
     abstract_fvar_at(term, fvar, 0)
 }
@@ -151,17 +147,17 @@ fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
             abstract_fvar_at(a, fvar, depth),
         ),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             abstract_fvar_at(ty, fvar.clone(), depth),
             abstract_fvar_at(body, fvar, depth + 1),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             abstract_fvar_at(ty, fvar.clone(), depth),
             abstract_fvar_at(body, fvar, depth + 1),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             abstract_fvar_at(ty, fvar.clone(), depth),
             abstract_fvar_at(body, fvar, depth + 1),
         ),
@@ -174,6 +170,7 @@ fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
 }
 
 /// Replaces all occurrences of `fvar` in `term` with `replacement`.
+#[must_use]
 pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
     match term {
         Term::FVar(u) if *u == *fvar => replacement.clone(),
@@ -191,17 +188,17 @@ pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
             replace_fvar(a, fvar, replacement),
         ),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             replace_fvar(ty, fvar, replacement),
             replace_fvar(body, fvar, replacement),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             replace_fvar(ty, fvar, replacement),
             replace_fvar(body, fvar, replacement),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             replace_fvar(ty, fvar, replacement),
             replace_fvar(body, fvar, replacement),
         ),
@@ -226,6 +223,7 @@ fn collect_app_spine(term: &Term) -> (&Term, Vec<&Term>) {
 }
 
 /// Replaces recursive calls in a term
+#[must_use]
 pub fn replace_rec_call(
     term: &Term,
     fn_name: &QualifiedName,
@@ -256,17 +254,17 @@ pub fn replace_rec_call(
             replace_rec_call(a, fn_name, structural_arg, replacement),
         ),
         Term::Lam(info, ty, body) => Term::mk_lam(
-            info.clone(),
+            *info,
             replace_rec_call(ty, fn_name, structural_arg, replacement),
             replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
         Term::Pi(info, ty, body) => Term::mk_pi(
-            info.clone(),
+            *info,
             replace_rec_call(ty, fn_name, structural_arg, replacement),
             replace_rec_call(body, fn_name, structural_arg, replacement),
         ),
         Term::Sigma(info, ty, body) => Term::mk_sigma(
-            info.clone(),
+            *info,
             replace_rec_call(ty, fn_name, structural_arg, replacement),
             replace_rec_call(body, fn_name, structural_arg, replacement),
         ),

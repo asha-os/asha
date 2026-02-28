@@ -9,6 +9,7 @@ use crate::{
 /// Only the outermost redexes are contracted: beta redexes (`App(Lam, arg)`),
 /// let-bindings, and assigned metavariables. All other term forms are returned
 /// as-is, since their head is already in normal form.
+#[must_use]
 pub fn whnf(state: &ElabState, term: &Term) -> Term {
     match term {
         Term::App(f, arg) => {
@@ -21,7 +22,7 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
 
         Term::Let(_, val, body) => whnf(state, &subst::instantiate(body, val)),
 
-        Term::MVar(u) => match state.mctx.get_assignment(u.clone()) {
+        Term::MVar(u) => match state.mctx.get_assignment(u) {
             Some(val) => whnf(state, val),
             None => term.clone(),
         },
@@ -35,6 +36,7 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
 /// Recursively peels off applications: `f a b c` yields `f`. Returns `Some`
 /// only if the head is a `Term::Const`. Used to identify which record or
 /// inductive type a value belongs to during projection elaboration.
+#[must_use]
 pub fn head_const(term: &Term) -> Option<&QualifiedName> {
     match term {
         Term::Const(name) => Some(name),
@@ -44,6 +46,7 @@ pub fn head_const(term: &Term) -> Option<&QualifiedName> {
 }
 
 /// Checks if a field type is recursive
+#[must_use]
 pub fn is_recursive_field(field_ty: &Term, inductive_name: &QualifiedName) -> bool {
     match field_ty {
         Term::Const(name) => name == inductive_name,
