@@ -2,6 +2,7 @@ class HAdd_ (a : Type) {
     add_ : a -> a -> a,
 }
 
+@[wired_in "nats"]
 inductive ScottNat {
     zero : ScottNat,
     succ : ScottNat -> ScottNat

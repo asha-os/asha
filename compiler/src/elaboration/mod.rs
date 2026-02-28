@@ -52,15 +52,14 @@ use crate::{
     module::{
         ModuleId,
         name::QualifiedName,
-        prim::*,
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term, uncurry},
     syntax::{
         Span, Spanned,
         tree::{
-            DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxBinder,
-            SyntaxExpr, SyntaxPattern, SyntaxTree, SyntaxTreeDeclaration,
+            DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxAttribute,
+            SyntaxBinder, SyntaxExpr, SyntaxPattern, SyntaxTree, SyntaxTreeDeclaration,
         },
     },
 };
@@ -118,6 +117,31 @@ impl Default for Namespace {
     }
 }
 
+/// The registry of built-in primitive types, operations, and type class instances.
+pub struct LanguageItems(BTreeMap<String, QualifiedName>);
+
+impl LanguageItems {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn insert(&mut self, name: &str, qname: QualifiedName) {
+        self.0.insert(name.to_string(), qname);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&QualifiedName> {
+        self.0.get(name)
+    }
+
+    pub fn get_string(&self) -> Option<&QualifiedName> {
+        self.get("string")
+    }
+
+    pub fn get_nat(&self) -> Option<&QualifiedName> {
+        self.get("nat")
+    }
+}
+
 /// The global elaboration environment.
 ///
 /// Holds all declarations produced during elaboration, externally-provided primitive
@@ -139,96 +163,6 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Creates an environment pre-loaded with built-in primitive types and operations.
-    ///
-    /// Also populates the root namespace so these names are resolvable.
-    #[deprecated]
-    pub fn pre_loaded(module_id: ModuleId) -> Self {
-        let mut externals = BTreeMap::new();
-        let inductives = BTreeMap::new();
-        externals.insert(PRIM_NAT, Term::type0());
-        externals.insert(PRIM_STRING, Term::type0());
-        externals.insert(PRIM_BOOL, Term::type0());
-        externals.insert(PRIM_TRUE, Term::Const(PRIM_BOOL));
-        externals.insert(PRIM_FALSE, Term::Const(PRIM_BOOL));
-        externals.insert(
-            PRIM_FIN,
-            Term::mk_pi(BinderInfo::Explicit, Term::Const(PRIM_NAT), Term::type0()),
-        );
-        externals.insert(
-            PRIM_ARRAY,
-            Term::mk_pi(
-                BinderInfo::Explicit,
-                Term::type0(),
-                Term::mk_pi(BinderInfo::Explicit, Term::Const(PRIM_NAT), Term::type0()),
-            ),
-        );
-        externals.insert(
-            PRIM_IO,
-            Term::mk_pi(BinderInfo::Explicit, Term::type0(), Term::type0()),
-        );
-        externals.insert(
-            PRIM_ADD_FN,
-            Term::mk_pi(
-                BinderInfo::Explicit,
-                Term::Const(PRIM_NAT),
-                Term::mk_pi(
-                    BinderInfo::Explicit,
-                    Term::Const(PRIM_NAT),
-                    Term::Const(PRIM_NAT),
-                ),
-            ),
-        );
-        externals.insert(
-            PRIM_GT_FN,
-            Term::mk_pi(
-                BinderInfo::Explicit,
-                Term::Const(PRIM_NAT),
-                Term::mk_pi(
-                    BinderInfo::Explicit,
-                    Term::Const(PRIM_NAT),
-                    Term::Sort(Level::Zero),
-                ),
-            ),
-        );
-        let mut root_namespace = Namespace::new();
-        root_namespace.decls.insert("Nat".into(), PRIM_NAT);
-        root_namespace.decls.insert("Str".into(), PRIM_STRING);
-        root_namespace.decls.insert("Fin".into(), PRIM_FIN);
-        root_namespace.decls.insert("Array".into(), PRIM_ARRAY);
-        root_namespace.decls.insert("IO".into(), PRIM_IO);
-        root_namespace.decls.insert("Bool".into(), PRIM_BOOL);
-        root_namespace.children.insert(
-            "Bool".into(),
-            Namespace {
-                decls: [("true".into(), PRIM_TRUE), ("false".into(), PRIM_FALSE)].into(),
-                children: BTreeMap::new(),
-            },
-        );
-        root_namespace.children.insert(
-            "Add".into(),
-            Namespace {
-                decls: [("add".into(), PRIM_ADD_FN)].into(),
-                children: BTreeMap::new(),
-            },
-        );
-        root_namespace.children.insert(
-            "Gt".into(),
-            Namespace {
-                decls: [("gt".into(), PRIM_GT_FN)].into(),
-                children: BTreeMap::new(),
-            },
-        );
-        Self {
-            module_id,
-            externals,
-            decls: BTreeMap::new(),
-            aliases: BTreeMap::new(),
-            root_namespace,
-            inductives,
-        }
-    }
-
     /// Looks up a declaration by its [`QualifiedName`]. Only searches module-local declarations,
     /// not externals.
     pub fn lookup(&self, name: &QualifiedName) -> Option<&Declaration> {
@@ -320,6 +254,8 @@ pub struct ElabState {
     pub open_namespaces: Vec<Vec<String>>,
     /// Errors accumulated during elaboration (reported at the end).
     pub errors: Vec<ElabError>,
+    /// Mapping of built-in primitive names to their qualified names in the environment.
+    pub lang_items: LanguageItems,
 }
 
 impl ElabState {
@@ -340,17 +276,8 @@ impl ElabState {
             current_namespace: Vec::new(),
             open_namespaces: Vec::new(),
             errors: Vec::new(),
+            lang_items: LanguageItems::new(),
         }
-    }
-
-    /// Creates an elaboration state pre-loaded with built-in primitive types and operators.
-    #[deprecated]
-    #[allow(deprecated)]
-    pub fn pre_loaded(module: ModuleId) -> Self {
-        let mut state = Self::new(module);
-        state.env = Environment::pre_loaded(state.env.module_id.clone());
-        state.open_namespaces.push(alloc::vec!["Bool".into()]);
-        state
     }
 
     /// Creates a fresh metavariable (unification hole) with the given type, using
@@ -449,29 +376,34 @@ impl ElabState {
                 span,
             } => self.elaborate_def(name, binders, return_type, body, *span),
             SyntaxTreeDeclaration::Record {
+                attributes,
                 name,
                 binders,
                 fields,
                 span,
-            } => self.elaborate_record(name, binders, fields, *span),
+            } => self.elaborate_record(attributes, name, binders, fields, *span),
             SyntaxTreeDeclaration::Extern {
                 name,
                 type_ann,
                 span,
             } => self.elaborate_extern(name, type_ann, *span),
             SyntaxTreeDeclaration::Inductive {
+                attributes,
                 name,
                 binders,
                 index_type,
                 constructors,
                 span,
-            } => self.elaborate_inductive(name, binders, index_type, constructors, *span),
+            } => {
+                self.elaborate_inductive(name, attributes, binders, index_type, constructors, *span)
+            }
             SyntaxTreeDeclaration::Class {
+                attributes,
                 name,
                 binders,
                 members,
                 span,
-            } => self.elaborate_class(name, binders, members, *span),
+            } => self.elaborate_class(attributes, name, binders, members, *span),
             SyntaxTreeDeclaration::Instance { .. } => {
                 // todo: implement instance elaboration
             }
@@ -696,10 +628,10 @@ impl ElabState {
                 ));
                 (self.erroneous_term(), self.erroneous_term())
             }
-            SyntaxExpr::Lit { value, .. } => {
+            SyntaxExpr::Lit { value, span } => {
                 let ty = match value {
-                    crate::spine::Literal::Nat(_) => Term::Const(PRIM_NAT),
-                    crate::spine::Literal::Str(_) => Term::Const(PRIM_STRING),
+                    crate::spine::Literal::Nat(_) => self.get_lang_item_or_error("nat", *span),
+                    crate::spine::Literal::Str(_) => self.get_lang_item_or_error("string", *span),
                 };
                 (Term::Lit(value.clone()), ty)
             }
@@ -713,12 +645,15 @@ impl ElabState {
                     self.fresh_mvar(Term::type0())
                 };
                 let elems_len = elems.len() as u64;
+                let array_lang_item = self.get_lang_item_or_error("array", syntax.span());
+                let array_nil_lang_item = self.get_lang_item_or_error("array_nil", syntax.span());
+                let array_cons_lang_item = self.get_lang_item_or_error("array_cons", syntax.span());
 
                 let array_type = Term::mk_app(
-                    Term::mk_app(Term::Const(PRIM_ARRAY), elem_type.clone()),
+                    Term::mk_app(array_lang_item, elem_type.clone()),
                     Term::Lit(Literal::Nat(elems_len)),
                 );
-                let mut result = Term::Const(PRIM_ARRAY_NIL);
+                let mut result = array_nil_lang_item.clone();
                 let mut elems = elems.clone();
                 elems.reverse();
                 for (current_length, elem) in elems.into_iter().enumerate() {
@@ -726,7 +661,7 @@ impl ElabState {
                     result = Term::mk_app(
                         Term::mk_app(
                             Term::mk_app(
-                                Term::mk_app(Term::Const(PRIM_ARRAY_CONS), elem_type.clone()),
+                                Term::mk_app(array_cons_lang_item.clone(), elem_type.clone()),
                                 Term::Lit(Literal::Nat(current_length as u64)),
                             ),
                             elaborated_elem,
@@ -737,63 +672,40 @@ impl ElabState {
                 (result, array_type)
             }
             SyntaxExpr::InfixOp { op, lhs, rhs, span } => {
-                let (op_namespace, op_name) = match op {
-                    InfixOp::Add => (PRIM_ADD_CLASS, PRIM_ADD_FN),
-                    InfixOp::Sub => (PRIM_SUB_CLASS, PRIM_SUB_FN),
-                    InfixOp::Mul => (PRIM_MUL_CLASS, PRIM_MUL_FN),
-                    InfixOp::Div => (PRIM_DIV_CLASS, PRIM_DIV_FN),
-                    InfixOp::Eq => (PRIM_BEQ_CLASS, PRIM_BEQ_FN),
-                    InfixOp::Neq => (PRIM_BNEQ_CLASS, PRIM_BNEQ_FN),
-                    InfixOp::Lt => (PRIM_LT_CLASS, PRIM_LT_FN),
-                    InfixOp::Gt => (PRIM_GT_CLASS, PRIM_GT_FN),
-                    InfixOp::Leq => (PRIM_LEQ_CLASS, PRIM_LEQ_FN),
-                    InfixOp::Geq => (PRIM_GEQ_CLASS, PRIM_GEQ_FN),
+                let op_fn_li = match op {
+                    InfixOp::Add => "add",
+                    InfixOp::Sub => "sub",
+                    InfixOp::Mul => "mul",
+                    InfixOp::Div => "div",
+                    InfixOp::Eq => "eq",
+                    InfixOp::Neq => "neq",
+                    InfixOp::Lt => "lt",
+                    InfixOp::Leq => "leq",
+                    InfixOp::Gt => "gt",
+                    InfixOp::Geq => "geq",
                 };
-                let namespace_str = op_namespace.display().unwrap();
-                let namespace = alloc::vec![namespace_str.to_string()];
-                let member = op_name.display().unwrap().to_string();
-                let var_term = self.elaborate_term(
-                    &SyntaxExpr::Var {
-                        namespace: namespace.clone(),
-                        member: member.clone(),
-                        span: *span,
-                    },
-                    None,
-                );
-                let (arg1, arg2_ty) = self.elaborate_term_inner(lhs);
-                let arg2 = self.elaborate_term(rhs, Some(&arg2_ty));
+                let Some(op_fn_name) = self.lang_items.get(op_fn_li).cloned() else {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::MissingLangItem(op_fn_li.to_string()),
+                        *span,
+                    ));
+                    return (self.erroneous_term(), self.erroneous_term());
+                };
+                let op_fn = Term::Const(op_fn_name.clone());
 
-                if let Some((_, expected_fn_type)) = self.resolve_name(&namespace, &member) {
-                    let return_type = match expected_fn_type {
-                        Term::Pi(_, _, body) => {
-                            let after_arg1 = subst::instantiate(body, &arg1);
-                            match after_arg1 {
-                                Term::Pi(_, _, body2) => subst::instantiate(&body2, &arg2),
-                                _ => {
-                                    self.errors.push(ElabError::new(
-                                        ElabErrorKind::NotAFunction(after_arg1),
-                                        *span,
-                                    ));
-                                    self.erroneous_term()
-                                }
-                            }
-                        }
-                        _ => {
-                            self.errors.push(ElabError::new(
-                                ElabErrorKind::NotAFunction(expected_fn_type.clone()),
-                                *span,
-                            ));
-                            self.erroneous_term()
-                        }
-                    };
-                    let term = Term::mk_app(Term::mk_app(var_term, arg1), arg2);
-                    (term, return_type)
+                let (arg1, arg1_ty) = self.elaborate_term_inner(lhs);
+                let (arg2, arg2_ty) = self.elaborate_term_inner(rhs);
+
+                if let Some((_, expected_fn_type)) = self.env.lookup_type(&op_fn_name) {
+                    self.make_app(
+                        op_fn,
+                        expected_fn_type.clone(),
+                        alloc::vec![(arg1, arg1_ty), (arg2, arg2_ty)],
+                        *span,
+                    )
                 } else {
                     self.errors.push(ElabError::new(
-                        ElabErrorKind::UndefinedVariable(format!(
-                            "{}::{}",
-                            &namespace_str, &member
-                        )),
+                        ElabErrorKind::UndefinedVariable(op_fn_li.to_string()),
                         *span,
                     ));
                     (self.erroneous_term(), self.erroneous_term())
@@ -957,6 +869,7 @@ impl ElabState {
     /// (stored in a child namespace `RecordName.fieldName`).
     fn elaborate_record(
         &mut self,
+        attributes: &[SyntaxAttribute],
         name: &str,
         binders: &[SyntaxBinder],
         fields: &[RecordField],
@@ -967,7 +880,14 @@ impl ElabState {
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders(binders);
-        self.register_inductive_type(name, &record_name, &binder_fvars, Term::type0(), span);
+        self.register_inductive_type(
+            attributes,
+            name,
+            &record_name,
+            &binder_fvars,
+            Term::type0(),
+            span,
+        );
 
         let mut field_data: Vec<(String, QualifiedName, Term)> = Vec::new();
         for field in fields {
@@ -1055,6 +975,7 @@ impl ElabState {
     /// Registers the type declaration for an inductive and adds it to the namespace
     fn register_inductive_type(
         &mut self,
+        attributes: &[SyntaxAttribute],
         name: &str,
         ind_name: &QualifiedName,
         binder_fvars: &[(Unique, BinderInfo, Term)],
@@ -1070,6 +991,7 @@ impl ElabState {
                 span,
             },
         );
+        self.optionally_register_lang_item(ind_name.clone(), attributes);
         self.register_in_namespace(name, ind_name.clone());
     }
 
@@ -1153,6 +1075,7 @@ impl ElabState {
     fn elaborate_inductive(
         &mut self,
         name: &str,
+        attributes: &[SyntaxAttribute],
         binders: &[SyntaxBinder],
         index_type: &Option<SyntaxExpr>,
         constructors: &[InductiveConstructor],
@@ -1167,7 +1090,7 @@ impl ElabState {
         } else {
             Term::type0()
         };
-        self.register_inductive_type(name, &ind_name, &binder_fvars, index_type, span);
+        self.register_inductive_type(attributes, name, &ind_name, &binder_fvars, index_type, span);
 
         let mut namespace = Namespace::new();
         let constructor_data = self.elaborate_inductive_constructors(
@@ -1248,6 +1171,7 @@ impl ElabState {
     /// `ClassName::memberName`.
     fn elaborate_class(
         &mut self,
+        attributes: &[SyntaxAttribute],
         name_str: &str,
         binders: &[SyntaxBinder],
         members: &[RecordField],
@@ -1258,7 +1182,14 @@ impl ElabState {
         let saved_lctx = self.lctx.clone();
 
         let binder_fvars = self.elaborate_binders(binders);
-        self.register_inductive_type(name_str, &name, &binder_fvars, Term::type0(), span);
+        self.register_inductive_type(
+            attributes,
+            name_str,
+            &name,
+            &binder_fvars,
+            Term::type0(),
+            span,
+        );
         let mut constructor_type = Term::Const(name.clone());
         for (fvar, _, _) in &binder_fvars {
             constructor_type = Term::mk_app(constructor_type, Term::FVar(fvar.clone()));
@@ -1277,7 +1208,11 @@ impl ElabState {
                 applied_class,
                 field_type.clone(),
             );
-            let wrapped_type = Self::abstract_binders(&binder_fvars, wrapped_type);
+            let implicit_binders = binder_fvars
+                .iter()
+                .map(|(u, _, ty)| (u.clone(), BinderInfo::Implicit, ty.clone()))
+                .collect::<Vec<_>>();
+            let wrapped_type = Self::abstract_binders(&implicit_binders, wrapped_type);
             // todo: make this a def
             let field_def = Declaration::Constructor {
                 name: field_name.clone(),
@@ -1285,6 +1220,7 @@ impl ElabState {
                 span: member.span,
             };
             self.env.decls.insert(field_name.clone(), field_def);
+            self.optionally_register_lang_item(field_name.clone(), &member.attributes);
             child_ns.decls.insert(field_display_name, field_name);
 
             constructor_type = Term::mk_pi(BinderInfo::Explicit, field_type, constructor_type);
@@ -1654,6 +1590,81 @@ impl ElabState {
             .insert(name.clone(), (final_value, final_type));
 
         self.lctx = saved_lctx;
+    }
+
+    /// Retrieves a language item by name, returning an error if it's not found
+    fn get_lang_item_or_error(&mut self, item: &str, span: Span) -> Term {
+        if let Some(li_name) = self.lang_items.get(item) {
+            Term::Const(li_name.clone())
+        } else {
+            self.errors.push(ElabError::new(
+                ElabErrorKind::MissingLangItem(item.to_string()),
+                span,
+            ));
+            self.erroneous_term()
+        }
+    }
+
+    /// Checks for a `#[wired_in("item_name")]` attribute and, if found, registers the given name as the implementation of that lang item
+    fn optionally_register_lang_item(
+        &mut self,
+        name: QualifiedName,
+        attributes: &[SyntaxAttribute],
+    ) {
+        for attr in attributes {
+            if attr.name == "wired_in"
+                && let Some(arg) = attr.args.first()
+                && let SyntaxExpr::Lit {
+                    value: Literal::Str(item_name),
+                    ..
+                } = arg
+            {
+                self.lang_items.insert(item_name, name.clone());
+            }
+        }
+    }
+
+    /// Given a base function and its type, applies leading implicit arguments until reaching an explicit parameter
+    /// Then, with the provided arguments and their types, abstracts over all binders (both implicit and explicit) to produce a final lambda term and its type
+    fn make_app(
+        &mut self,
+        base_fn: Term,
+        base_fn_type: Term,
+        args: Vec<(Term, Term)>,
+        span: Span,
+    ) -> (Term, Term) {
+        let (term_with_implicits, fn_type_after_implicits) =
+            self.insert_implicit_args_until(base_fn, base_fn_type, BinderInfo::Explicit);
+
+        let mut term = term_with_implicits;
+        let mut result_type = fn_type_after_implicits;
+
+        for (arg, arg_ty) in args.into_iter().rev() {
+            term = Term::mk_app(term, arg);
+            result_type = match result_type {
+                Term::Pi(_, param_ty, body_ty) => {
+                    if !self.unify(&param_ty, &arg_ty) {
+                        self.errors.push(ElabError::new(
+                            ElabErrorKind::TypeMismatch {
+                                expected: *param_ty.clone(),
+                                found: arg_ty.clone(),
+                            },
+                            span,
+                        ));
+                    }
+                    *body_ty
+                }
+                _ => {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::NotAFunction(result_type.clone()),
+                        span,
+                    ));
+                    return (self.erroneous_term(), self.erroneous_term());
+                }
+            };
+        }
+
+        (term, result_type)
     }
 }
 

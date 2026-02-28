@@ -1,3 +1,19 @@
+@[wired_in "nat"]
+inductive Nat {
+    zero : Nat,
+    succ : Nat -> Nat
+}
+
+class Add (a : Type) {
+    @[wired_in "add"]
+    add : a -> a -> a,
+}
+
+class Gt (a : Type) {
+    @[wired_in "gt"]
+    gt : a -> a -> Prop,
+}
+
 def add (x : Nat) : Nat = x + 5
 
 def prop (x : Nat) : Prop = x > 5

@@ -35,6 +35,7 @@ pub enum TokenKind {
     Product,
     EndOfFile,
     Def,
+    At,
     Alias,
     Let,
     In,

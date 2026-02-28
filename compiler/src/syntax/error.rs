@@ -129,6 +129,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Instance => write!(f, "`instance`"),
             TokenKind::Comma => write!(f, "`,`"),
             TokenKind::Colon => write!(f, "`:`"),
+            TokenKind::At => write!(f, "`@`"),
             TokenKind::DoubleColon => write!(f, "`::`"),
             TokenKind::LBrace => write!(f, "`{{`"),
             TokenKind::RBrace => write!(f, "`}}`"),

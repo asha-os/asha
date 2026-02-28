@@ -1,7 +1,9 @@
 use core::fmt::Display;
 
 use crate::{
-    module::name::QualifiedName, spine::Term, syntax::{Span, tree::SyntaxExpr}
+    module::name::QualifiedName,
+    spine::Term,
+    syntax::{Span, tree::SyntaxExpr},
 };
 use alloc::{
     boxed::Box,
@@ -53,7 +55,7 @@ impl Display for ElabError {
             }
             ElabErrorKind::NotInductive(term) => {
                 write!(f, "not an inductive type: '{}'", term)
-            },
+            }
             ElabErrorKind::UnknownInductive(name) => {
                 write!(f, "unknown inductive type '{}'", name)
             }
@@ -65,6 +67,9 @@ impl Display for ElabError {
                 "impossible pattern: expected '{}', found '{}'",
                 expected, found
             ),
+            ElabErrorKind::MissingLangItem(item) => {
+                write!(f, "missing required lang item for {}", item)
+            }
         }
     }
 }
@@ -84,6 +89,7 @@ pub enum ElabErrorKind {
     UnknownInductive(QualifiedName),
     NotAConstructorType(Term),
     ImpossiblePattern { expected: Term, found: Term },
+    MissingLangItem(String),
 }
 
 impl miette::StdError for ElabError {}

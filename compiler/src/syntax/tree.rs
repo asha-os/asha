@@ -35,6 +35,7 @@ pub enum SyntaxTreeDeclaration {
         span: Span,
     },
     Class {
+        attributes: Vec<SyntaxAttribute>,
         name: String,
         binders: Vec<SyntaxBinder>,
         members: Vec<RecordField>,
@@ -48,6 +49,7 @@ pub enum SyntaxTreeDeclaration {
         span: Span,
     },
     Record {
+        attributes: Vec<SyntaxAttribute>,
         name: String,
         binders: Vec<SyntaxBinder>,
         fields: Vec<RecordField>,
@@ -60,6 +62,7 @@ pub enum SyntaxTreeDeclaration {
     },
     Inductive {
         name: String,
+        attributes: Vec<SyntaxAttribute>,
         index_type: Option<SyntaxExpr>,
         binders: Vec<SyntaxBinder>,
         constructors: Vec<InductiveConstructor>,
@@ -96,6 +99,7 @@ pub struct PatternMatchArm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordField {
+    pub attributes: Vec<SyntaxAttribute>,
     pub name: String,
     pub type_ann: Box<SyntaxExpr>,
     pub span: Span,
@@ -231,6 +235,13 @@ pub struct MatchArm {
     pub patterns: Vec<SyntaxPattern>,
     pub rhs: Box<SyntaxExpr>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxAttribute {
+    pub name: String,
+    pub args: Vec<SyntaxExpr>,
+    pub span: Span,    
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
