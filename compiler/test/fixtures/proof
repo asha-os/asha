@@ -1,7 +1,7 @@
 @[wired_in "nat"]
 inductive Nat {
     zero : Nat,
-    succ : Nat -> Nat
+    succ : Nat -> Nat,
 }
 
 class Add (a : Type) {
