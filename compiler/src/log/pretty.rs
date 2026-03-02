@@ -4,6 +4,7 @@ use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
+    vec::Vec,
 };
 
 use crate::{
@@ -47,46 +48,113 @@ impl Display for Term {
 
 #[must_use]
 pub fn pretty_term(term: &Term) -> String {
-    match term {
-        Term::MVar(_) => "✸".into(),
-        Term::BVar(de_bruijn_index) => format!("b{de_bruijn_index}"),
+    pretty_term_prec(term, 0)
+}
+
+/// Pretty-print a term with a precedence level to control parenthesisation
+#[must_use]
+fn pretty_term_prec(term: &Term, prec: u8) -> String {
+    let s = match term {
+        Term::MVar(_) => "?_".into(),
+        Term::BVar(i) => format!("b{i}"),
         Term::FVar(unique) => unique
             .display_name
             .clone()
-            .map_or_else(|| format!("f{}", unique.id), |name| format!("'{name}'")),
-        Term::Const(qname) => qname.display().unwrap().to_string(),
-        Term::App(func, arg) => format!("{} ({})", pretty_term(func), pretty_term(arg)),
+            .map_or_else(|| format!("f{}", unique.id), |name| name),
+        Term::Const(qname) => qname.display().unwrap_or("<unknown>").to_string(),
+
+        Term::App(_, _) => {
+            let (head, args) = collect_spine(term);
+            let head_str = pretty_term_prec(head, 1);
+            let args_str: String = args
+                .iter()
+                .map(|a| format!(" {}", pretty_term_prec(a, 1)))
+                .collect();
+            format!("{head_str}{args_str}")
+        }
+
         Term::Pi(binder_info, param, body) => {
-            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
-            format!("{} -> {}", binder_str, pretty_term(body))
+            let param_str = pretty_term_prec(param, 0);
+            let body_str = pretty_term_prec(body, 0);
+            match binder_info {
+                BinderInfo::Explicit => format!("{param_str} -> {body_str}"),
+                BinderInfo::Implicit => format!("{{{param_str}}} -> {body_str}"),
+                BinderInfo::InstanceImplicit => format!("[{param_str}] -> {body_str}"),
+                BinderInfo::StrictImplicit => format!("{{{{{param_str}}}}} -> {body_str}"),
+            }
         }
+
         Term::Lam(binder_info, param, body) => {
-            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
-            format!("λ {}. {}", binder_str, pretty_term(body))
+            let param_str = pretty_term_prec(param, 0);
+            let body_str = pretty_term_prec(body, 0);
+            match binder_info {
+                BinderInfo::Explicit => format!("λ {param_str} => {body_str}"),
+                BinderInfo::Implicit => format!("λ {{{param_str}}} => {body_str}"),
+                BinderInfo::InstanceImplicit => format!("λ [{param_str}] => {body_str}"),
+                BinderInfo::StrictImplicit => format!("λ {{{{{param_str}}}}} => {body_str}"),
+            }
         }
+
         Term::Sigma(binder_info, param, body) => {
-            let binder_str = binder_surrounding(*binder_info, &pretty_term(param));
-            format!("{} × {}", binder_str, pretty_term(body))
+            let param_str = pretty_term_prec(param, 0);
+            let body_str = pretty_term_prec(body, 0);
+            match binder_info {
+                BinderInfo::Explicit => format!("({param_str} × {body_str})"),
+                _ => format!("{param_str} × {body_str}"),
+            }
         }
-        Term::Sort(level) => format!("Type({level})"),
-        Term::Let(binding, value, body) => format!(
-            "let {} = {} in {}",
-            pretty_term(binding),
-            pretty_term(value),
-            pretty_term(body)
+
+        Term::Sort(level) => match level {
+            Level::Zero => "Prop".into(),
+            Level::Succ(inner) if **inner == Level::Zero => "Type".into(),
+            other => format!("Type({other})"),
+        },
+
+        Term::Let(ty, value, body) => format!(
+            "let _ : {} := {} in {}",
+            pretty_term_prec(ty, 0),
+            pretty_term_prec(value, 0),
+            pretty_term_prec(body, 0),
         ),
-        Term::Lit(lit) => format!("{lit:?}"),
+
+        Term::Lit(crate::spine::Literal::Nat(n)) => format!("{n}"),
+        Term::Lit(crate::spine::Literal::Str(s)) => format!("\"{s}\""),
+
         Term::Unit => "()".to_string(),
+    };
+
+    if prec >= 1 && needs_parens(term) {
+        format!("({s})")
+    } else {
+        s
     }
 }
 
-fn binder_surrounding(binder_info: BinderInfo, str: &str) -> String {
-    match binder_info {
-        BinderInfo::Explicit => format!("({str})"),
-        BinderInfo::Implicit => format!("{{{str}}}"),
-        BinderInfo::InstanceImplicit => format!("[{str}]"),
-        BinderInfo::StrictImplicit => format!("{{{{{str}}}}}"),
+/// Returns true for terms that need parentheses when used as a function argument.
+fn needs_parens(term: &Term) -> bool {
+    match term {
+        Term::MVar(_)
+        | Term::BVar(_)
+        | Term::FVar(_)
+        | Term::Const(_)
+        | Term::Lit(_)
+        | Term::Unit => false,
+        Term::Sort(Level::Zero) => false,
+        Term::Sort(Level::Succ(inner)) if **inner == Level::Zero => false,
+        _ => true,
     }
+}
+
+/// Decomposes an application spine
+fn collect_spine(term: &Term) -> (&Term, Vec<&Term>) {
+    let mut args = Vec::new();
+    let mut cur = term;
+    while let Term::App(f, a) = cur {
+        args.push(a.as_ref());
+        cur = f;
+    }
+    args.reverse();
+    (cur, args)
 }
 
 impl Display for QualifiedName {

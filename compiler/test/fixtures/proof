@@ -14,6 +14,22 @@ class Gt (a : Type) {
     gt : a -> a -> Prop,
 }
 
+inductive False : Prop {}
+
+inductive True : Prop {
+    trivial : True,
+}
+
+def gt : Nat -> Nat -> Prop
+    | Nat::zero, Nat::zero => False
+    | Nat::zero, Nat::succ _ => False
+    | Nat::succ _, Nat::zero => True
+    | Nat::succ x, Nat::succ y => gt x y
+
+def proof_of_true : True = True::trivial
+
+def lt1 : gt 0 1 = True::trivial
+
 def add (x : Nat) : Nat = x + 5
 
 def prop (x : Nat) : Prop = x > 5

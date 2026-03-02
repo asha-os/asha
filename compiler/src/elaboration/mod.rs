@@ -596,9 +596,18 @@ impl ElabState {
         if let Some(expected) = expected_type
             && !self.unify(&inferred_type, expected)
         {
+            let reduced_to = {
+                let reduced = reduce::whnf(self, expected);
+                if &reduced != expected {
+                    Some(reduced)
+                } else {
+                    None
+                }
+            };
             self.errors.push(ElabError::new(
                 err::ElabErrorKind::TypeMismatch {
                     expected: expected.clone(),
+                    reduced_to,
                     found: inferred_type,
                 },
                 syntax.span(),
@@ -1590,9 +1599,18 @@ impl ElabState {
         if let Some(type_ann) = &elaborated_type_ann
             && !self.unify(type_ann, &value_type)
         {
+            let reduced_to = {
+                let reduced = reduce::whnf(self, type_ann);
+                if &reduced != type_ann {
+                    Some(reduced)
+                } else {
+                    None
+                }
+            };
             self.errors.push(ElabError::new(
                 ElabErrorKind::TypeMismatch {
                     expected: type_ann.clone(),
+                    reduced_to,
                     found: value_type.clone(),
                 },
                 span,
@@ -1664,9 +1682,18 @@ impl ElabState {
             term = Term::mk_app(term, arg);
             result_type = if let Term::Pi(_, param_ty, body_ty) = result_type {
                 if !self.unify(&param_ty, &arg_ty) {
+                    let reduced_to = {
+                        let reduced = reduce::whnf(self, &param_ty);
+                        if reduced != *param_ty {
+                            Some(reduced)
+                        } else {
+                            None
+                        }
+                    };
                     self.errors.push(ElabError::new(
                         ElabErrorKind::TypeMismatch {
                             expected: *param_ty.clone(),
+                            reduced_to,
                             found: arg_ty.clone(),
                         },
                         span,

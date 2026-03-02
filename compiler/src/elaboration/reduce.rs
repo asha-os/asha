@@ -1,5 +1,7 @@
+use alloc::vec::Vec;
+
 use crate::{
-    elaboration::{ElabState, subst},
+    elaboration::{Declaration, ElabState, subst},
     module::name::QualifiedName,
     spine::Term,
 };
@@ -26,6 +28,14 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
             Some(val) => whnf(state, val),
             None => term.clone(),
         },
+
+        Term::Const(name) => {
+            if let Some(Declaration::Definition { value, .. }) = state.env.lookup(name) {
+                whnf(state, &value.clone())
+            } else {
+                term.clone()
+            }
+        }
 
         _ => term.clone(),
     }
