@@ -5,11 +5,7 @@ use crate::{
     spine::Term,
     syntax::{Span, tree::SyntaxExpr},
 };
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-};
+use alloc::{boxed::Box, format, string::String};
 use miette::{Diagnostic, LabeledSpan};
 
 #[derive(Debug)]

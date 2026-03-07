@@ -173,8 +173,10 @@ pub struct Environment {
     pub aliases: BTreeMap<QualifiedName, (Term, Term)>,
     /// The root of the namespace tree for name resolution.
     pub root_namespace: Namespace,
-    /// Metadata for inductive types. Used during pattern match elaboration.
+    /// Metadata for inductive types.
     pub inductives: BTreeMap<QualifiedName, InductiveMetadata>,
+    /// Reverse lookup of match functions to inductive name
+    pub match_fns: BTreeMap<QualifiedName, QualifiedName>,
 }
 
 impl Environment {
@@ -291,6 +293,7 @@ impl ElabState {
                 aliases: BTreeMap::new(),
                 root_namespace: Namespace::new(),
                 inductives: BTreeMap::new(),
+                match_fns: BTreeMap::new(),
             },
             gen_: UniqueGen::new(module),
             mctx: MetavarContext::new(),
@@ -1099,9 +1102,13 @@ impl ElabState {
             num_params: binder_fvars.len(),
             num_indices: 0, // todo
             constructors: constructor_names,
-            match_fn: match_fn_name,
+            match_fn: match_fn_name.clone(),
             is_recursive: false, // todo
         };
+        self.env
+            .match_fns
+            .insert(match_fn_name.clone(), ind_name.clone());
+        self.env.inductives.insert(match_fn_name, metadata.clone());
         self.env.inductives.insert(ind_name, metadata);
     }
 
