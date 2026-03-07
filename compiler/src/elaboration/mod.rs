@@ -458,25 +458,25 @@ impl ElabState {
     /// Returns a list of `(fvar, binder_info, elaborated_type)` triples, which can later
     /// be used by [`Self::abstract_binders`] to build Pi types.
     fn elaborate_binders(&mut self, binders: &[SyntaxBinder]) -> Vec<(Unique, BinderInfo, Term)> {
-        let mut binder_fvars = Vec::new();
-        for binder in binders {
-            let (binder_name, binder_type_syntax, info) = match binder {
-                SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
-                SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
-                SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
-            };
-            let (elaborated_type, type_of_type) = self.elaborate_term_inner(binder_type_syntax);
-            let normalized_type_of_type = reduce::whnf(self, &type_of_type);
-            if !matches!(normalized_type_of_type, Term::Sort(_)) {
-                self.errors.push(ElabError::new(
-                    ElabErrorKind::TypeExpected(elaborated_type.clone()),
-                    binder.span(),
-                ));
-            }
-            let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
-            binder_fvars.push((fvar, info, elaborated_type));
+        binders.iter().map(|b| self.elaborate_binder(b)).collect()
+    }
+
+    fn elaborate_binder(&mut self, binder: &SyntaxBinder) -> (Unique, BinderInfo, Term) {
+        let (binder_name, binder_type_syntax, info) = match binder {
+            SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
+            SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
+            SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+        };
+        let (elaborated_type, type_of_type) = self.elaborate_term_inner(&*binder_type_syntax);
+        let normalized_type_of_type = reduce::whnf(self, &type_of_type);
+        if !matches!(normalized_type_of_type, Term::Sort(_)) {
+            self.errors.push(ElabError::new(
+                ElabErrorKind::TypeExpected(elaborated_type.clone()),
+                binder.span(),
+            ));
         }
-        binder_fvars
+        let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
+        (fvar, info, elaborated_type)
     }
 
     /// Converts free variables introduced by [`Self::elaborate_binders`] back into bound
@@ -823,6 +823,26 @@ impl ElabState {
                 (term, result_type)
             }
             SyntaxExpr::Unit { .. } => (Term::Unit, Term::type0()),
+            SyntaxExpr::Pi {
+                binder, codomain, ..
+            } => {
+                let (fvar, info, elaborated_binder_type) = self.elaborate_binder(binder);
+                let (elaborated_codomain, codomain_type) = self.elaborate_term_inner(codomain);
+                let normalized_codomain_type = reduce::whnf(self, &codomain_type);
+                if !matches!(normalized_codomain_type, Term::Sort(_)) {
+                    self.errors.push(ElabError::new(
+                        ElabErrorKind::TypeExpected(elaborated_codomain.clone()),
+                        codomain.span(),
+                    ));
+                }
+                let abstracted_body = subst::abstract_fvar(&elaborated_codomain, fvar.clone());
+                let pi_type = Term::mk_pi(
+                    info,
+                    elaborated_binder_type.clone(),
+                    abstracted_body,
+                );
+                (pi_type, Term::type0())
+            }
             u => {
                 self.errors.push(ElabError::new(
                     err::ElabErrorKind::UnsupportedSyntax(u.clone()),
@@ -1284,9 +1304,11 @@ impl ElabState {
 
     /// Elaborates a pattern match expression to a core term.
     ///
-    /// 1. Elaborates each pattern in each arm against the corresponding scrutinee type.
-    /// 2. Elaborates the right-hand side of each arm against the expected return type
-    /// 3. Compiles the resulting pattern matrix into a core term via `patterns::compile`.
+    /// 1. Builds a motive from the scrutinee types
+    /// 2. Elaborates each pattern in each arm against the corresponding scrutinee type
+    /// 3. Specializes the expected return type for each arm by applying the motive
+    /// 4. Elaborates the right-hand side of each arm against the specialized expected type.
+    /// 5. Compiles the resulting pattern matrix into a core term via `patterns::compile`
     fn elaborate_pattern_match(
         &mut self,
         scrutinees: Vec<Scrutinee>,
@@ -1295,10 +1317,15 @@ impl ElabState {
         match_fn: Option<QualifiedName>,
         span: Span,
     ) -> Term {
+        let mut motive = expected_type.clone();
+        for s in scrutinees.iter().rev() {
+            motive = Term::mk_lam(BinderInfo::Explicit, s.type_.clone(), motive);
+        }
+
         let rows = arms
             .iter()
             .map(|arm| {
-                let patterns = arm
+                let patterns: Vec<Pattern> = arm
                     .patterns
                     .iter()
                     .enumerate()
@@ -1309,7 +1336,13 @@ impl ElabState {
                             .map(|scrutinee| self.elaborate_pattern(p, &scrutinee.type_))
                     })
                     .collect();
-                let rhs = self.elaborate_term(&arm.rhs, Some(&expected_type));
+
+                let mut specialized = motive.clone();
+                for pat in &patterns {
+                    specialized = Term::mk_app(specialized, self.pattern_to_term(pat));
+                }
+                let specialized = reduce::whnf(self, &specialized);
+                let rhs = self.elaborate_term(&arm.rhs, Some(&specialized));
                 PatternRow::new(patterns, rhs)
             })
             .collect::<Vec<_>>();
@@ -1323,6 +1356,26 @@ impl ElabState {
             }
         }
     }
+
+    /// Builds a core [`Term`] from an elaborated [`Pattern`].
+    fn pattern_to_term(&mut self, pattern: &Pattern) -> Term {
+        match pattern {
+            Pattern::Var(Some(fvar)) => Term::FVar(fvar.clone()),
+            Pattern::Var(None) => {
+                let u = self.gen_.fresh_unnamed();
+                Term::FVar(u)
+            }
+            Pattern::Constructor { ctor, fields, .. } => {
+                let mut term = Term::Const(ctor.clone());
+                for field in fields {
+                    term = Term::mk_app(term, self.pattern_to_term(field));
+                }
+                term
+            }
+            Pattern::Lit(lit) => Term::Lit(lit.clone()),
+        }
+    }
+
 
     fn elaborate_pattern(&mut self, pattern: &SyntaxPattern, expected_type: &Term) -> Pattern {
         match pattern {

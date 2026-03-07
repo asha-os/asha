@@ -56,6 +56,7 @@ pub struct MatchProblem {
     pub scrutinees: Vec<Scrutinee>,
     pub rows: Vec<PatternRow>,
     pub return_type: Term,
+    pub motive: Term,
     pub match_fn: Option<QualifiedName>,
 }
 
@@ -67,10 +68,16 @@ impl MatchProblem {
         return_type: Term,
         match_fn: Option<QualifiedName>,
     ) -> Self {
+        let motive = if let Some(s) = scrutinees.first() {
+            Term::mk_lam(BinderInfo::Explicit, s.type_.clone(), return_type.clone())
+        } else {
+            return_type.clone()
+        };
         Self {
             scrutinees,
             rows,
             return_type,
+            motive,
             match_fn,
         }
     }
@@ -122,12 +129,7 @@ pub fn compile(
         .cloned()
         .collect::<Vec<_>>();
 
-    let scrutinee_type = problem.scrutinees[col].type_.clone();
-    let motive_term = Term::mk_lam(
-        BinderInfo::Explicit,
-        scrutinee_type.clone(),
-        problem.return_type.clone(),
-    );
+    let motive_term = problem.motive.clone();
 
     let mut branches = Vec::new();
     for ctor_name in &ctors {
@@ -338,12 +340,12 @@ fn specialize(
         }
     }
 
-    let sub_problem = MatchProblem {
-        scrutinees: new_scrutinees,
-        rows: new_rows,
-        return_type: problem.return_type.clone(),
-        match_fn: problem.match_fn.clone(),
-    };
+    let sub_problem = MatchProblem::new(
+        new_scrutinees,
+        new_rows,
+        problem.return_type.clone(),
+        problem.match_fn.clone(),
+    );
     (sub_problem, field_fvars)
 }
 
@@ -379,15 +381,16 @@ fn all_variables_elimination(problem: MatchProblem, col: usize) -> MatchProblem 
             rhs,
         });
     }
-    MatchProblem {
-        scrutinees: problem
-            .scrutinees
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, s)| if i == col { None } else { Some(s) })
-            .collect(),
-        rows: new_rows,
-        return_type: problem.return_type,
-        match_fn: problem.match_fn,
-    }
+    let new_scrutinees = problem
+        .scrutinees
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, s)| if i == col { None } else { Some(s) })
+        .collect();
+    MatchProblem::new(
+        new_scrutinees,
+        new_rows,
+        problem.return_type,
+        problem.match_fn,
+    )
 }

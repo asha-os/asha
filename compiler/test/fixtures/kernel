@@ -1,0 +1,46 @@
+@[wired_in "nat"]
+inductive Nat {
+    zero : Nat,
+    succ : Nat -> Nat,
+}
+
+class Eq (a : Type) {
+    @[wired_in "eq"]
+    eq : a -> a -> Prop,
+}
+
+class Gt (a : Type) {
+    @[wired_in "gt"]
+    gt : a -> a -> Prop,
+}
+
+inductive False : Prop {}
+
+inductive True : Prop {
+    trivial : True,
+}
+
+def add : Nat -> Nat -> Nat
+    | Nat::zero, y => y
+    | Nat::succ x, y => Nat::succ (add x y)
+
+def gt : Nat -> Nat -> Prop
+    | Nat::zero, Nat::zero => False
+    | Nat::zero, Nat::succ _ => False
+    | Nat::succ _, Nat::zero => True
+    | Nat::succ x, Nat::succ y => gt x y
+
+def eq : Nat -> Nat -> Prop
+    | Nat::zero, Nat::zero => True
+    | Nat::zero, Nat::succ _ => False
+    | Nat::succ _, Nat::zero => False
+    | Nat::succ x, Nat::succ y => eq x y
+
+def proof_of_true : True = True::trivial
+
+def lt1 : gt 1 0 = True::trivial
+
+def xplus1bigger : (x : Nat) -> gt (add x 1) 1
+    | Nat::zero => True::trivial
+    | Nat::succ x => True::trivial
+    

@@ -12,15 +12,14 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
     match term {
         Term::App(f, arg) => {
             let f = whnf(state, f);
-            match &f {
-                Term::Lam(_, _, body) => whnf(state, &subst::instantiate(body, arg)),
-                _ => {
-                    let app = Term::mk_app(f, *arg.clone());
-                    if let Some(reduced) = try_iota(state, &app) {
-                        whnf(state, &reduced)
-                    } else {
-                        app
-                    }
+            if let Term::Lam(_, _, body) = &f {
+                whnf(state, &subst::instantiate(body, arg))
+            } else {
+                let app = Term::mk_app(f, *arg.clone());
+                if let Some(reduced) = try_iota(state, &app) {
+                    whnf(state, &reduced)
+                } else {
+                    app
                 }
             }
         }
