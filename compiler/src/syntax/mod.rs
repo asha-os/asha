@@ -1,9 +1,10 @@
+pub mod ast;
 pub mod error;
+pub mod kind;
 pub mod lexer;
 pub mod parser;
-pub mod kind;
 pub mod token;
-pub mod tree;
+
 
 pub struct SourceFile<'a> {
     pub id: usize,
@@ -87,16 +88,3 @@ pub trait Spanned {
     fn span(&self) -> Span;
 }
 
-pub fn spanning<A: Spanned, B: Spanned>(a: &A, b: &B) -> Span {
-    let span_a = a.span();
-    let span_b = b.span();
-    assert!(
-        span_a.file == span_b.file,
-        "Cannot span across different files"
-    );
-    Span::new(
-        span_a.file,
-        span_a.start.min(span_b.start),
-        span_a.end.max(span_b.end),
-    )
-}

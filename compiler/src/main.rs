@@ -10,9 +10,11 @@ use api::{
 };
 use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource};
 
+use cstree::syntax::SyntaxNode;
+
 use crate::{
     log::ErrorWithSource,
-    syntax::{SourceFile, lexer::Lexer, parser::parse},
+    syntax::{SourceFile, kind::SyntaxKind, lexer::Lexer, parser::parse},
 };
 
 extern crate alloc;
@@ -56,8 +58,7 @@ pub extern "C" fn _start() -> ! {
         let mut lex_errors = alloc::vec::Vec::new();
         for result in &mut lexer {
             match result {
-                Ok(token) if token.kind == crate::syntax::token::TokenKind::Whitespace => {}
-                Ok(token) => tokens.push((token, token.span)),
+                Ok(token) => tokens.push(token),
                 Err(err) => lex_errors.push(err),
             }
         }
@@ -77,10 +78,9 @@ pub extern "C" fn _start() -> ! {
             }
         }
 
-        let eoi_span = lexer.eoi_span();
-        let (ast, errors) = parse(&tokens, eoi_span);
+        let parse_output = parse(&tokens, source_file.id);
 
-        for err in &errors {
+        for err in &parse_output.errors {
             let mut output = String::new();
             let err_with_source = ErrorWithSource {
                 error: err,
@@ -91,30 +91,31 @@ pub extern "C" fn _start() -> ! {
             }
         }
 
-        match ast {
-            Some(tree) => {
-                println!("AST produced for module {}: {:#?}", source_file.name, tree);
-                let module_id = source_file.name.to_string();
-                println!("Elaborating module {}...", module_id);
-                match elaboration::elaborate_file(module_id, &tree) {
-                    Ok(elab) => println!("Elaboration successful:\n{}", elab),
-                    Err(errs) => {
-                        println!("Elaboration failed with {} error(s):", errs.len());
-                        for err in &errs {
-                            let mut output = String::new();
-                            let err_with_source = ErrorWithSource {
-                                error: err,
-                                source: &named_source,
-                            };
-                            if handler.render_report(&mut output, &err_with_source).is_ok() {
-                                println!("{}", output);
-                            }
+        {
+            let interner = parse_output.cache.into_interner().unwrap();
+            let root = SyntaxNode::<SyntaxKind>::new_root_with_resolver(
+                parse_output.green,
+                interner,
+            );
+            println!("CST produced for module {}", source_file.name);
+            let module_id = source_file.name.to_string();
+            println!("Elaborating module {}...", module_id);
+            match elaboration::elaborate_file(module_id, &root, source_file.id) {
+                Ok(elab) => println!("Elaboration successful:\n{}", elab),
+                Err(errs) => {
+                    println!("Elaboration failed with {} error(s):", errs.len());
+                    for err in &errs {
+                        let mut output = String::new();
+                        let err_with_source = ErrorWithSource {
+                            error: err,
+                            source: &named_source,
+                        };
+                        if handler.render_report(&mut output, &err_with_source).is_ok() {
+                            println!("{}", output);
                         }
                     }
                 }
             }
-            None if errors.is_empty() && lex_errors.is_empty() => println!("No AST produced"),
-            None => {}
         }
 
         exit(0);

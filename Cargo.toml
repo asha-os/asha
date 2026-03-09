@@ -18,7 +18,7 @@ api = { path = "api" }
 runtime = { path = "runtime" }
 thiserror = { version = "2", default-features = false }
 anyhow = { version = "1", default-features = false }
-chumsky = { version = "0.12", default-features = false }
+cstree = { git = "https://github.com/asha-os/cstree", default-features = false }
 miette = { git = "https://github.com/huitseeker/miette", branch = "no-std", default-features = false, features=["fancy-base"] }
 spin = "0.10"
 talc = "4.4"

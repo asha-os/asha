@@ -3,7 +3,7 @@ use core::fmt::Display;
 use crate::{
     module::name::QualifiedName,
     spine::Term,
-    syntax::{Span, tree::SyntaxExpr},
+    syntax::Span,
 };
 use alloc::{boxed::Box, format, string::String};
 use miette::{Diagnostic, LabeledSpan};
@@ -30,7 +30,7 @@ impl Display for ElabError {
                 write!(f, "undefined constructor `{name}`")
             }
             ElabErrorKind::TypeMismatch { .. } => write!(f, "type mismatch"),
-            ElabErrorKind::UnsupportedSyntax(_) => write!(f, "unsupported syntax"),
+            ElabErrorKind::UnsupportedSyntax => write!(f, "unsupported syntax"),
             ElabErrorKind::NotAFunction(_) => write!(f, "expected a function"),
             ElabErrorKind::CannotProject(_, field) => write!(f, "no field `{field}` on this type"),
             ElabErrorKind::TypeExpected(_) => write!(f, "expected a type"),
@@ -54,7 +54,7 @@ pub enum ElabErrorKind {
         reduced_to: Option<Term>,
         found: Term,
     },
-    UnsupportedSyntax(SyntaxExpr),
+    UnsupportedSyntax,
     NotAFunction(Term),
     CannotProject(Term, String),
     TypeExpected(Term),
@@ -78,7 +78,7 @@ impl Diagnostic for ElabError {
             ElabErrorKind::UndefinedVariable(_) => "E0201",
             ElabErrorKind::UndefinedConstructor(_) => "E0202",
             ElabErrorKind::TypeMismatch { .. } => "E0203",
-            ElabErrorKind::UnsupportedSyntax(_) => "E0204",
+            ElabErrorKind::UnsupportedSyntax => "E0204",
             ElabErrorKind::NotAFunction(_) => "E0205",
             ElabErrorKind::CannotProject(_, _) => "E0206",
             ElabErrorKind::TypeExpected(_) => "E0207",
@@ -108,7 +108,7 @@ impl Diagnostic for ElabError {
                 expected, found, ..
             } => format!("expected `{expected}`, found `{found}`"),
 
-            ElabErrorKind::UnsupportedSyntax(_) => "this syntax is not yet supported".into(),
+            ElabErrorKind::UnsupportedSyntax => "this syntax is not yet supported".into(),
 
             ElabErrorKind::NotAFunction(term) => format!("`{term}` is not a function"),
 

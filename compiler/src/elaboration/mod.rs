@@ -56,10 +56,11 @@ use crate::{
     },
     spine::{BinderInfo, Level, Literal, Term, uncurry},
     syntax::{
-        Span, Spanned,
-        tree::{
-            DefBody, InductiveConstructor, InfixOp, PatternMatchArm, RecordField, SyntaxAttribute,
-            SyntaxBinder, SyntaxExpr, SyntaxPattern, SyntaxTree, SyntaxTreeDeclaration,
+        Span,
+        ast::{
+            self, AliasDecl, Attribute, Binder, ClassDecl, Decl, DefBody, DefDecl, Expr,
+            ExternDecl, InductiveCtor, InductiveDecl, InfixOp, PatternMatchArm, RecordDecl,
+            SourceFile, SyntaxNodeR,
         },
     },
 };
@@ -279,12 +280,14 @@ pub struct ElabState {
     pub errors: Vec<ElabError>,
     /// Mapping of built-in primitive names to their qualified names in the environment.
     pub lang_items: LanguageItems,
+    /// Source file ID for span computation from CST nodes.
+    pub file: usize,
 }
 
 impl ElabState {
     /// Creates a blank elaboration state with no pre-loaded primitives.
     #[must_use]
-    pub fn new(module: ModuleId) -> Self {
+    pub fn new(module: ModuleId, file: usize) -> Self {
         Self {
             env: Environment {
                 module_id: module.clone(),
@@ -302,6 +305,7 @@ impl ElabState {
             open_namespaces: Vec::new(),
             errors: Vec::new(),
             lang_items: LanguageItems::new(),
+            file,
         }
     }
 
@@ -390,64 +394,22 @@ impl ElabState {
     }
 
     /// Dispatches a top-level declaration to the appropriate elaboration handler.
-    pub fn elaborate_declaration(&mut self, decl: &SyntaxTreeDeclaration) {
+    pub fn elaborate_declaration(&mut self, decl: &Decl) {
         match decl {
-            SyntaxTreeDeclaration::Def {
-                name,
-                binders,
-                return_type,
-                body,
-                span,
-            } => self.elaborate_def(name, binders, return_type, body, *span),
-            SyntaxTreeDeclaration::Record {
-                attributes,
-                name,
-                binders,
-                fields,
-                span,
-            } => self.elaborate_record(attributes, name, binders, fields, *span),
-            SyntaxTreeDeclaration::Extern {
-                name,
-                type_ann,
-                span,
-            } => self.elaborate_extern(name, type_ann, *span),
-            SyntaxTreeDeclaration::Inductive {
-                attributes,
-                name,
-                binders,
-                index_type,
-                constructors,
-                span,
-            } => {
-                self.elaborate_inductive(
-                    name,
-                    attributes,
-                    binders,
-                    index_type.as_ref(),
-                    constructors,
-                    *span,
-                );
-            }
-            SyntaxTreeDeclaration::Class {
-                attributes,
-                name,
-                binders,
-                members,
-                span,
-            } => self.elaborate_class(attributes, name, binders, members, *span),
-            SyntaxTreeDeclaration::Instance { .. } => {
+            Decl::Def(d) => self.elaborate_def(d),
+            Decl::Record(d) => self.elaborate_record(d),
+            Decl::Extern(d) => self.elaborate_extern(d),
+            Decl::Inductive(d) => self.elaborate_inductive(d),
+            Decl::Class(d) => self.elaborate_class(d),
+            Decl::Instance(_) => {
                 // todo: implement instance elaboration
             }
-            SyntaxTreeDeclaration::Alias {
-                name,
-                binders,
-                type_ann,
-                value,
-                span,
-            } => self.elaborate_alias(name, binders, type_ann.as_ref(), value, *span),
-            SyntaxTreeDeclaration::Eval { expr, .. } => {
-                let term = self.elaborate_term(expr, None);
-                println!("Evaluated term: {:#?}", &term);
+            Decl::Alias(d) => self.elaborate_alias(d),
+            Decl::Eval(d) => {
+                if let Some(expr) = d.expr() {
+                    let term = self.elaborate_term(&expr, None);
+                    println!("Evaluated term: {:#?}", &term);
+                }
             }
         }
     }
@@ -457,25 +419,35 @@ impl ElabState {
     ///
     /// Returns a list of `(fvar, binder_info, elaborated_type)` triples, which can later
     /// be used by [`Self::abstract_binders`] to build Pi types.
-    fn elaborate_binders(&mut self, binders: &[SyntaxBinder]) -> Vec<(Unique, BinderInfo, Term)> {
-        binders.iter().map(|b| self.elaborate_binder(b)).collect()
+    fn elaborate_binders_iter<'a, I>(&mut self, binders: I) -> Vec<(Unique, BinderInfo, Term)>
+    where
+        I: Iterator<Item = Binder<'a>>,
+    {
+        binders.map(|b| self.elaborate_binder(&b)).collect()
     }
 
-    fn elaborate_binder(&mut self, binder: &SyntaxBinder) -> (Unique, BinderInfo, Term) {
-        let (binder_name, binder_type_syntax, info) = match binder {
-            SyntaxBinder::Explicit(_, n, ty) => (n, ty, BinderInfo::Explicit),
-            SyntaxBinder::Implicit(_, n, ty) => (n, ty, BinderInfo::Implicit),
-            SyntaxBinder::Instance(_, n, ty) => (n, ty, BinderInfo::InstanceImplicit),
+    fn elaborate_binder(&mut self, binder: &Binder) -> (Unique, BinderInfo, Term) {
+        let info = match binder {
+            Binder::Explicit(_) => BinderInfo::Explicit,
+            Binder::Implicit(_) => BinderInfo::Implicit,
+            Binder::Instance(_) => BinderInfo::InstanceImplicit,
         };
-        let (elaborated_type, type_of_type) = self.elaborate_term_inner(&*binder_type_syntax);
+        let binder_name = binder.name().unwrap_or("_").to_string();
+        let binder_type_expr = binder.type_ann();
+        let (elaborated_type, type_of_type) = if let Some(ty) = binder_type_expr {
+            self.elaborate_term_inner(&ty)
+        } else {
+            let m = self.fresh_mvar(Term::type0());
+            (m.clone(), Term::type0())
+        };
         let normalized_type_of_type = reduce::whnf(self, &type_of_type);
         if !matches!(normalized_type_of_type, Term::Sort(_)) {
             self.errors.push(ElabError::new(
                 ElabErrorKind::TypeExpected(elaborated_type.clone()),
-                binder.span(),
+                binder.span(self.file),
             ));
         }
-        let (fvar, _) = self.fresh_fvar(binder_name.clone(), elaborated_type.clone());
+        let (fvar, _) = self.fresh_fvar(binder_name, elaborated_type.clone());
         (fvar, info, elaborated_type)
     }
 
@@ -507,31 +479,37 @@ impl ElabState {
     /// 3. Abstracts the binders into a Pi type and lambda body.
     /// 4. Registers the definition in the environment and namespace.
     /// 5. Restores the local context.
-    fn elaborate_def(
-        &mut self,
-        name: &str,
-        binders: &[SyntaxBinder],
-        return_type: &SyntaxExpr,
-        body: &DefBody,
-        span: Span,
-    ) {
+    fn elaborate_def(&mut self, d: &DefDecl) {
+        let name = d.name().unwrap_or("_");
+        let span = d.span(self.file);
         let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
 
         let saved_lctx = self.lctx.clone();
-        let binder_fvars = self.elaborate_binders(binders);
-        let elaborated_return_type = self.elaborate_term(return_type, None);
+        let binder_fvars = self.elaborate_binders_iter(d.binders());
+        let return_type_expr = d.return_type();
+        let elaborated_return_type = if let Some(rt) = &return_type_expr {
+            self.elaborate_term(rt, None)
+        } else {
+            self.fresh_mvar(Term::type0())
+        };
         let pi_type = Self::abstract_binders(&binder_fvars, elaborated_return_type.clone());
 
-        let elaborated_body = match body {
-            DefBody::Expr(body) => self.elaborate_term(body, Some(&elaborated_return_type)),
-            DefBody::PatternMatch { arms, span } => {
+        let body = d.body();
+        let is_pattern_match = matches!(&body, Some(DefBody::PatternMatch(_)));
+
+        let elaborated_body = match &body {
+            Some(DefBody::Expr(body_expr)) => {
+                self.elaborate_term(body_expr, Some(&elaborated_return_type))
+            }
+            Some(DefBody::PatternMatch(arms_node)) => {
+                let arms_span = arms_node.span(self.file);
                 // Pre-register as Opaque so recursive calls resolve during body elaboration
                 self.env.decls.insert(
                     def_name.clone(),
                     Declaration::Opaque {
                         name: def_name.clone(),
                         type_: pi_type.clone(),
-                        span: *span,
+                        span: arms_span,
                     },
                 );
                 self.register_in_namespace(name, def_name.clone());
@@ -547,12 +525,14 @@ impl ElabState {
                         type_: ty.clone(),
                     })
                     .collect::<Vec<_>>();
+
+                let arms: Vec<_> = arms_node.arms().collect();
                 let body = self.elaborate_pattern_match(
                     scrutinees,
-                    arms,
+                    &arms,
                     pattern_return_type,
                     Some(def_name.clone()),
-                    *span,
+                    arms_span,
                 );
 
                 let mut lambda = body;
@@ -561,6 +541,7 @@ impl ElabState {
                 }
                 lambda
             }
+            None => self.erroneous_term(),
         };
 
         let mut value = elaborated_body;
@@ -577,7 +558,7 @@ impl ElabState {
                 span,
             },
         );
-        if !matches!(body, DefBody::PatternMatch { .. }) {
+        if !is_pattern_match {
             self.register_in_namespace(name, def_name);
         }
 
@@ -587,7 +568,7 @@ impl ElabState {
     /// Elaborates a syntax expression into a core [`Term`], optionally checking it against
     /// an expected type. If the inferred type does not unify with the expected type,
     /// a [`ElabErrorKind::TypeMismatch`] is recorded.
-    fn elaborate_term(&mut self, syntax: &SyntaxExpr, expected_type: Option<&Term>) -> Term {
+    fn elaborate_term(&mut self, syntax: &Expr, expected_type: Option<&Term>) -> Term {
         let (term, inferred_type) = self.elaborate_term_inner(syntax);
 
         let (term, inferred_type) = if expected_type.is_some() {
@@ -613,7 +594,7 @@ impl ElabState {
                     reduced_to,
                     found: inferred_type,
                 },
-                syntax.span(),
+                syntax.span(self.file),
             ));
         }
 
@@ -623,62 +604,62 @@ impl ElabState {
     /// Core term elaboration. Returns `(elaborated_term, inferred_type)`.
     ///
     /// Handles all expression forms and reports errors for unsupported syntax.
-    fn elaborate_term_inner(&mut self, syntax: &SyntaxExpr) -> (Term, Term) {
+    fn elaborate_term_inner(&mut self, syntax: &Expr) -> (Term, Term) {
+        let span = syntax.span(self.file);
         match syntax {
-            SyntaxExpr::Var {
-                namespace, member, ..
-            } => {
+            Expr::Var(v) => {
+                let (namespace, member) = v.qualified_parts();
                 if namespace.is_empty()
                     && let Some(decl) = self.lctx.lookup_name(member)
                 {
                     return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
 
-                if let Some((name, type_)) = self.resolve_name(namespace, member) {
+                if let Some((name, type_)) = self.resolve_name(&namespace, member) {
                     return (Term::Const(name.clone()), type_.clone());
                 }
 
                 self.errors.push(ElabError::new(
-                    ElabErrorKind::UndefinedVariable(member.clone()),
-                    syntax.span(),
+                    ElabErrorKind::UndefinedVariable(member.to_string()),
+                    span,
                 ));
                 (self.erroneous_term(), self.erroneous_term())
             }
-            SyntaxExpr::Constructor { name, .. } if name == "Type" => {
-                let u = self.gen_.fresh_unnamed();
-                let level = Level::MVar(u);
-                (Term::Sort(level.clone()), Term::Sort(level.succ()))
-            }
-            SyntaxExpr::Constructor { name, .. } if name == "Prop" => {
-                (Term::Sort(Level::Zero), Term::type0())
-            }
-            SyntaxExpr::Constructor {
-                namespace, name, ..
-            } => {
-                if let Some((name, type_)) = self.resolve_name(namespace, name) {
-                    return (Term::Const(name.clone()), type_.clone());
+            Expr::Ctor(c) => {
+                let (namespace, name) = c.qualified_parts();
+                if name == "Type" {
+                    let u = self.gen_.fresh_unnamed();
+                    let level = Level::MVar(u);
+                    return (Term::Sort(level.clone()), Term::Sort(level.succ()));
+                }
+                if name == "Prop" {
+                    return (Term::Sort(Level::Zero), Term::type0());
                 }
 
-                if let Some((_, val, type_)) = self.resolve_alias(namespace, name) {
+                if let Some((qn, type_)) = self.resolve_name(&namespace, name) {
+                    return (Term::Const(qn.clone()), type_.clone());
+                }
+
+                if let Some((_, val, type_)) = self.resolve_alias(&namespace, name) {
                     return (val.clone(), type_.clone());
                 }
 
                 self.errors.push(ElabError::new(
-                    ElabErrorKind::UndefinedConstructor(name.clone()),
-                    syntax.span(),
+                    ElabErrorKind::UndefinedConstructor(name.to_string()),
+                    span,
                 ));
                 (self.erroneous_term(), self.erroneous_term())
             }
-            SyntaxExpr::Lit { value, span } => {
-                let ty = match value {
-                    crate::spine::Literal::Nat(_) => self.get_lang_item_or_error("nat", *span),
-                    crate::spine::Literal::Str(_) => self.get_lang_item_or_error("string", *span),
+            Expr::Lit(lit) => {
+                let value = lit.literal().unwrap_or(Literal::Nat(0));
+                let ty = match &value {
+                    Literal::Nat(_) => self.get_lang_item_or_error("nat", span),
+                    Literal::Str(_) => self.get_lang_item_or_error("string", span),
                 };
-                (Term::Lit(value.clone()), ty)
+                (Term::Lit(value), ty)
             }
-            SyntaxExpr::Array {
-                elements: elems, ..
-            } => {
+            Expr::Array(arr) => {
+                let elems: Vec<_> = arr.elements().collect();
                 let elem_type = if let Some(head) = elems.first() {
                     let (_term, head_ty) = self.elaborate_term_inner(head);
                     head_ty
@@ -686,18 +667,16 @@ impl ElabState {
                     self.fresh_mvar(Term::type0())
                 };
                 let elems_len = elems.len() as u64;
-                let array_lang_item = self.get_lang_item_or_error("array", syntax.span());
-                let array_nil_lang_item = self.get_lang_item_or_error("array_nil", syntax.span());
-                let array_cons_lang_item = self.get_lang_item_or_error("array_cons", syntax.span());
+                let array_lang_item = self.get_lang_item_or_error("array", span);
+                let array_nil_lang_item = self.get_lang_item_or_error("array_nil", span);
+                let array_cons_lang_item = self.get_lang_item_or_error("array_cons", span);
 
                 let array_type = Term::mk_app(
                     Term::mk_app(array_lang_item, elem_type.clone()),
                     Term::Lit(Literal::Nat(elems_len)),
                 );
                 let mut result = array_nil_lang_item.clone();
-                let mut elems = elems.clone();
-                elems.reverse();
-                for (current_length, elem) in elems.into_iter().enumerate() {
+                for (current_length, elem) in elems.into_iter().rev().enumerate() {
                     let elaborated_elem = self.elaborate_term(&elem, Some(&elem_type));
                     result = Term::mk_app(
                         Term::mk_app(
@@ -712,7 +691,8 @@ impl ElabState {
                 }
                 (result, array_type)
             }
-            SyntaxExpr::InfixOp { op, lhs, rhs, span } => {
+            Expr::Infix(infix) => {
+                let op = infix.op().unwrap_or(InfixOp::Add);
                 let op_fn_li = match op {
                     InfixOp::Add => "add",
                     InfixOp::Sub => "sub",
@@ -728,33 +708,57 @@ impl ElabState {
                 let Some(op_fn_name) = self.lang_items.get(op_fn_li).cloned() else {
                     self.errors.push(ElabError::new(
                         ElabErrorKind::MissingLangItem(op_fn_li.to_string()),
-                        *span,
+                        span,
                     ));
                     return (self.erroneous_term(), self.erroneous_term());
                 };
                 let op_fn = Term::Const(op_fn_name.clone());
 
-                let (arg1, arg1_ty) = self.elaborate_term_inner(lhs);
-                let (arg2, arg2_ty) = self.elaborate_term_inner(rhs);
+                let lhs = infix.lhs();
+                let rhs = infix.rhs();
+                let (arg1, arg1_ty) = if let Some(l) = &lhs {
+                    self.elaborate_term_inner(l)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                };
+                let (arg2, arg2_ty) = if let Some(r) = &rhs {
+                    self.elaborate_term_inner(r)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                };
 
                 if let Some((_, expected_fn_type)) = self.env.lookup_type(&op_fn_name) {
                     self.make_app(
                         op_fn,
                         expected_fn_type.clone(),
                         alloc::vec![(arg1, arg1_ty), (arg2, arg2_ty)],
-                        *span,
+                        span,
                     )
                 } else {
                     self.errors.push(ElabError::new(
                         ElabErrorKind::UndefinedVariable(op_fn_li.to_string()),
-                        *span,
+                        span,
                     ));
                     (self.erroneous_term(), self.erroneous_term())
                 }
             }
-            SyntaxExpr::App { fun, arg, .. } => self.elaborate_app(syntax, fun, arg),
-            SyntaxExpr::Proj { value, field, span } => {
-                let (elaborated_value, value_type) = self.elaborate_term_inner(value);
+            Expr::App(app) => {
+                let fun = app.fun();
+                let arg = app.arg();
+                if let (Some(f), Some(a)) = (&fun, &arg) {
+                    self.elaborate_app(syntax, f, a)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                }
+            }
+            Expr::Proj(proj) => {
+                let value_expr = proj.value();
+                let field = proj.field().unwrap_or("");
+                let (elaborated_value, value_type) = if let Some(v) = &value_expr {
+                    self.elaborate_term_inner(v)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                };
                 let normalized_value_type = reduce::whnf(self, &value_type);
                 if let Some(record_name) = head_const(&normalized_value_type) {
                     let namespace = record_name.display().unwrap().to_string();
@@ -773,31 +777,37 @@ impl ElabState {
                             (term, return_type)
                         } else {
                             self.errors
-                                .push(ElabError::new(ElabErrorKind::NotAFunction(fn_type), *span));
+                                .push(ElabError::new(ElabErrorKind::NotAFunction(fn_type), span));
                             (self.erroneous_term(), self.erroneous_term())
                         }
                     } else {
                         self.errors.push(ElabError::new(
                             ElabErrorKind::UndefinedVariable(format!("{namespace}::{field}")),
-                            *span,
+                            span,
                         ));
                         (self.erroneous_term(), self.erroneous_term())
                     }
                 } else {
                     self.errors.push(ElabError::new(
-                        ElabErrorKind::CannotProject(elaborated_value, field.clone()),
-                        *span,
+                        ElabErrorKind::CannotProject(elaborated_value, field.to_string()),
+                        span,
                     ));
                     (self.erroneous_term(), self.erroneous_term())
                 }
             }
-            SyntaxExpr::Arrow {
-                param_type,
-                return_type,
-                ..
-            } => {
-                let elaborated_param_type = self.elaborate_term(param_type, None);
-                let elaborated_return_type = self.elaborate_term(return_type, None);
+            Expr::Arrow(arrow) => {
+                let param = arrow.param_type();
+                let ret = arrow.return_type();
+                let elaborated_param_type = if let Some(p) = &param {
+                    self.elaborate_term(p, None)
+                } else {
+                    self.erroneous_term()
+                };
+                let elaborated_return_type = if let Some(r) = &ret {
+                    self.elaborate_term(r, None)
+                } else {
+                    self.erroneous_term()
+                };
                 (
                     Term::mk_pi(
                         BinderInfo::Explicit,
@@ -807,10 +817,15 @@ impl ElabState {
                     Term::type0(),
                 )
             }
-            SyntaxExpr::Lambda { binders, body, .. } => {
+            Expr::Lambda(lam) => {
                 let saved_lctx = self.lctx.clone();
-                let binder_fvars = self.elaborate_binders(binders);
-                let (elaborated_body, body_type) = self.elaborate_term_inner(body);
+                let binder_fvars = self.elaborate_binders_iter(lam.binders());
+                let body_expr = lam.body();
+                let (elaborated_body, body_type) = if let Some(b) = &body_expr {
+                    self.elaborate_term_inner(b)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                };
                 let mut term = elaborated_body;
                 let mut result_type = body_type;
                 for (fvar, info, ty) in binder_fvars.iter().rev() {
@@ -822,31 +837,39 @@ impl ElabState {
                 self.lctx = saved_lctx;
                 (term, result_type)
             }
-            SyntaxExpr::Unit { .. } => (Term::Unit, Term::type0()),
-            SyntaxExpr::Pi {
-                binder, codomain, ..
-            } => {
-                let (fvar, info, elaborated_binder_type) = self.elaborate_binder(binder);
-                let (elaborated_codomain, codomain_type) = self.elaborate_term_inner(codomain);
+            Expr::Unit(_) => (Term::Unit, Term::type0()),
+            Expr::Pi(pi) => {
+                let binder = pi.binder();
+                let codomain_expr = pi.codomain();
+                let (fvar, info, elaborated_binder_type) = if let Some(b) = &binder {
+                    self.elaborate_binder(b)
+                } else {
+                    let mvar = self.fresh_mvar(Term::type0());
+                    let (fvar, _) = self.fresh_fvar("_".to_string(), mvar);
+                    (fvar, BinderInfo::Explicit, self.erroneous_term())
+                };
+                let (elaborated_codomain, codomain_type) = if let Some(c) = &codomain_expr {
+                    self.elaborate_term_inner(c)
+                } else {
+                    (self.erroneous_term(), self.erroneous_term())
+                };
                 let normalized_codomain_type = reduce::whnf(self, &codomain_type);
                 if !matches!(normalized_codomain_type, Term::Sort(_)) {
-                    self.errors.push(ElabError::new(
-                        ElabErrorKind::TypeExpected(elaborated_codomain.clone()),
-                        codomain.span(),
-                    ));
+                    if let Some(c) = &codomain_expr {
+                        self.errors.push(ElabError::new(
+                            ElabErrorKind::TypeExpected(elaborated_codomain.clone()),
+                            c.span(self.file),
+                        ));
+                    }
                 }
                 let abstracted_body = subst::abstract_fvar(&elaborated_codomain, fvar.clone());
-                let pi_type = Term::mk_pi(
-                    info,
-                    elaborated_binder_type.clone(),
-                    abstracted_body,
-                );
+                let pi_type = Term::mk_pi(info, elaborated_binder_type.clone(), abstracted_body);
                 (pi_type, Term::type0())
             }
-            u => {
+            _ => {
                 self.errors.push(ElabError::new(
-                    err::ElabErrorKind::UnsupportedSyntax(u.clone()),
-                    syntax.span(),
+                    err::ElabErrorKind::UnsupportedSyntax,
+                    span,
                 ));
                 (self.erroneous_term(), self.erroneous_term())
             }
@@ -889,9 +912,9 @@ impl ElabState {
     /// `arg` against the expected parameter type and instantiates the return type.
     fn elaborate_app(
         &mut self,
-        syntax: &SyntaxExpr,
-        fun: &SyntaxExpr,
-        arg: &SyntaxExpr,
+        syntax: &Expr,
+        fun: &Expr,
+        arg: &Expr,
     ) -> (Term, Term) {
         let (term, fn_type) = self.elaborate_term_inner(fun);
         let (term, fn_type) = self.insert_implicit_args(term, fn_type);
@@ -905,7 +928,7 @@ impl ElabState {
             u => {
                 self.errors.push(ElabError::new(
                     ElabErrorKind::NotAFunction(u),
-                    syntax.span(),
+                    syntax.span(self.file),
                 ));
                 (self.erroneous_term(), self.erroneous_term())
             }
@@ -923,21 +946,17 @@ impl ElabState {
     /// Creates the record type constant (typed as `Type`), a `new` constructor whose
     /// parameters are the record fields, and a projection function for each field
     /// (stored in a child namespace `RecordName.fieldName`).
-    fn elaborate_record(
-        &mut self,
-        attributes: &[SyntaxAttribute],
-        name: &str,
-        binders: &[SyntaxBinder],
-        fields: &[RecordField],
-        span: Span,
-    ) {
+    fn elaborate_record(&mut self, d: &RecordDecl) {
+        let name = d.name().unwrap_or("_");
+        let span = d.span(self.file);
         let record_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
         let mut child_ns = Namespace::new();
 
         let saved_lctx = self.lctx.clone();
-        let binder_fvars = self.elaborate_binders(binders);
+        let attributes: Vec<_> = d.attributes().collect();
+        let binder_fvars = self.elaborate_binders_iter(d.binders());
         self.register_inductive_type(
-            attributes,
+            &attributes,
             name,
             &record_name,
             &binder_fvars,
@@ -945,11 +964,17 @@ impl ElabState {
             span,
         );
 
+        let fields: Vec<_> = d.fields().collect();
         let mut field_data: Vec<(String, QualifiedName, Term)> = Vec::new();
-        for field in fields {
-            let field_qname = QualifiedName::User(self.gen_.fresh(field.name.clone()));
-            let field_type = self.elaborate_term(&field.type_ann, None);
-            field_data.push((field.name.clone(), field_qname, field_type));
+        for field in &fields {
+            let field_name = field.name().unwrap_or("_").to_string();
+            let field_qname = QualifiedName::User(self.gen_.fresh(field_name.clone()));
+            let field_type = if let Some(ty) = field.type_ann() {
+                self.elaborate_term(&ty, None)
+            } else {
+                self.erroneous_term()
+            };
+            field_data.push((field_name, field_qname, field_type));
         }
 
         let mut constructor_type = Term::Const(record_name.clone());
@@ -1016,8 +1041,13 @@ impl ElabState {
 
     /// Elaborates an `extern` declaration: type-checks the annotation and registers
     /// it as an external (opaque) binding in the environment.
-    fn elaborate_extern(&mut self, name: &str, type_ann: &SyntaxExpr, _span: Span) {
-        let elaborated_type = self.elaborate_term(type_ann, None);
+    fn elaborate_extern(&mut self, d: &ExternDecl) {
+        let name = d.name().unwrap_or("_");
+        let elaborated_type = if let Some(ty) = d.type_ann() {
+            self.elaborate_term(&ty, None)
+        } else {
+            self.erroneous_term()
+        };
         let qname = QualifiedName::User(self.gen_.fresh(name.to_string()));
         self.env.externals.insert(qname.clone(), elaborated_type);
         self.register_in_namespace(name, qname);
@@ -1031,7 +1061,7 @@ impl ElabState {
     /// Registers the type declaration for an inductive and adds it to the namespace
     fn register_inductive_type(
         &mut self,
-        attributes: &[SyntaxAttribute],
+        attributes: &[Attribute],
         name: &str,
         ind_name: &QualifiedName,
         binder_fvars: &[(Unique, BinderInfo, Term)],
@@ -1132,32 +1162,28 @@ impl ElabState {
         self.env.inductives.insert(ind_name, metadata);
     }
 
-    fn elaborate_inductive(
-        &mut self,
-        name: &str,
-        attributes: &[SyntaxAttribute],
-        binders: &[SyntaxBinder],
-        index_type: Option<&SyntaxExpr>,
-        constructors: &[InductiveConstructor],
-        span: Span,
-    ) {
+    fn elaborate_inductive(&mut self, d: &InductiveDecl) {
+        let name = d.name().unwrap_or("_");
+        let span = d.span(self.file);
         let ind_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
         let saved_lctx = self.lctx.clone();
 
-        let binder_fvars = self.elaborate_binders(binders);
-        let index_type = if let Some(index_ty) = index_type {
-            self.elaborate_term(index_ty, None)
+        let attributes: Vec<_> = d.attributes().collect();
+        let binder_fvars = self.elaborate_binders_iter(d.binders());
+        let index_type = if let Some(index_ty) = d.index_type() {
+            self.elaborate_term(&index_ty, None)
         } else {
             Term::type0()
         };
-        self.register_inductive_type(attributes, name, &ind_name, &binder_fvars, index_type, span);
+        self.register_inductive_type(&attributes, name, &ind_name, &binder_fvars, index_type, span);
 
         let mut namespace = Namespace::new();
+        let constructors: Vec<_> = d.constructors().collect();
         let constructor_data = self.elaborate_inductive_constructors(
             &mut namespace,
             &ind_name,
             &binder_fvars,
-            constructors,
+            &constructors,
         );
 
         self.register_inductive(
@@ -1181,16 +1207,17 @@ impl ElabState {
         inductive_namespace: &mut Namespace,
         inductive_name: &QualifiedName,
         binders: &[(Unique, BinderInfo, Term)],
-        constructors: &[InductiveConstructor],
+        constructors: &[InductiveCtor],
     ) -> Vec<(QualifiedName, Term)> {
         let mut constructor_data = Vec::new();
         for constructor in constructors {
-            let ctor_name = QualifiedName::User(self.gen_.fresh(constructor.name.clone()));
+            let ctor_display_name = constructor.name().unwrap_or("_").to_string();
+            let ctor_name = QualifiedName::User(self.gen_.fresh(ctor_display_name.clone()));
             let saved_lctx = self.lctx.clone();
-            let ctor_binder_fvars = self.elaborate_binders(&constructor.binders);
+            let ctor_binder_fvars = self.elaborate_binders_iter(constructor.binders());
 
-            let base_type = if let Some(type_ann) = &constructor.type_ann {
-                self.elaborate_term(type_ann, None)
+            let base_type = if let Some(type_ann) = constructor.type_ann() {
+                self.elaborate_term(&type_ann, None)
             } else {
                 Term::Const(inductive_name.clone())
             };
@@ -1205,18 +1232,19 @@ impl ElabState {
                 Self::abstract_binders(&ctor_binder_fvars, base_type),
             );
 
+            let ctor_span = constructor.span(self.file);
             self.env.decls.insert(
                 ctor_name.clone(),
                 Declaration::Constructor {
                     name: ctor_name.clone(),
                     type_: constructor_type.clone(),
-                    span: constructor.span,
+                    span: ctor_span,
                 },
             );
 
             inductive_namespace
                 .decls
-                .insert(constructor.name.clone(), ctor_name.clone());
+                .insert(ctor_display_name, ctor_name.clone());
             self.lctx = saved_lctx;
             constructor_data.push((ctor_name, constructor_type));
         }
@@ -1229,21 +1257,17 @@ impl ElabState {
     /// wraps its type in an instance-implicit parameter `[self : ClassName args] -> FieldType`,
     /// enabling typeclass-style dispatch. Members are placed in a child namespace
     /// `ClassName::memberName`.
-    fn elaborate_class(
-        &mut self,
-        attributes: &[SyntaxAttribute],
-        name_str: &str,
-        binders: &[SyntaxBinder],
-        members: &[RecordField],
-        span: Span,
-    ) {
+    fn elaborate_class(&mut self, d: &ClassDecl) {
+        let name_str = d.name().unwrap_or("_");
+        let span = d.span(self.file);
         let name = QualifiedName::User(self.gen_.fresh(name_str.to_string()));
         let mut child_ns = Namespace::new();
         let saved_lctx = self.lctx.clone();
 
-        let binder_fvars = self.elaborate_binders(binders);
+        let attributes: Vec<_> = d.attributes().collect();
+        let binder_fvars = self.elaborate_binders_iter(d.binders());
         self.register_inductive_type(
-            attributes,
+            &attributes,
             name_str,
             &name,
             &binder_fvars,
@@ -1254,10 +1278,15 @@ impl ElabState {
         for (fvar, _, _) in &binder_fvars {
             constructor_type = Term::mk_app(constructor_type, Term::FVar(fvar.clone()));
         }
+        let members: Vec<_> = d.members().collect();
         for member in members.iter().rev() {
-            let field_display_name = member.name.clone();
-            let field_name = QualifiedName::User(self.gen_.fresh(member.name.clone()));
-            let field_type = self.elaborate_term(&member.type_ann, None);
+            let field_display_name = member.name().unwrap_or("_").to_string();
+            let field_name = QualifiedName::User(self.gen_.fresh(field_display_name.clone()));
+            let field_type = if let Some(ty) = member.type_ann() {
+                self.elaborate_term(&ty, None)
+            } else {
+                self.erroneous_term()
+            };
 
             let mut applied_class = Term::Const(name.clone());
             for (fvar, _, _) in &binder_fvars {
@@ -1273,14 +1302,15 @@ impl ElabState {
                 .map(|(u, _, ty)| (u.clone(), BinderInfo::Implicit, ty.clone()))
                 .collect::<Vec<_>>();
             let wrapped_type = Self::abstract_binders(&implicit_binders, wrapped_type);
-            // todo: make this a def
+            let member_span = member.span(self.file);
             let field_def = Declaration::Constructor {
                 name: field_name.clone(),
                 type_: wrapped_type.clone(),
-                span: member.span,
+                span: member_span,
             };
             self.env.decls.insert(field_name.clone(), field_def);
-            self.optionally_register_lang_item(&field_name, &member.attributes);
+            let member_attrs: Vec<_> = member.attributes().collect();
+            self.optionally_register_lang_item(&field_name, &member_attrs);
             child_ns.decls.insert(field_display_name, field_name);
 
             constructor_type = Term::mk_pi(BinderInfo::Explicit, field_type, constructor_type);
@@ -1325,12 +1355,11 @@ impl ElabState {
         let rows = arms
             .iter()
             .map(|arm| {
-                let patterns: Vec<Pattern> = arm
-                    .patterns
+                let arm_patterns: Vec<_> = arm.patterns().collect();
+                let patterns: Vec<Pattern> = arm_patterns
                     .iter()
                     .enumerate()
                     .filter_map(|(i, p)| {
-                        // Associates nth pattern's type to nth scrutinee's type
                         scrutinees
                             .get(i)
                             .map(|scrutinee| self.elaborate_pattern(p, &scrutinee.type_))
@@ -1342,7 +1371,12 @@ impl ElabState {
                     specialized = Term::mk_app(specialized, self.pattern_to_term(pat));
                 }
                 let specialized = reduce::whnf(self, &specialized);
-                let rhs = self.elaborate_term(&arm.rhs, Some(&specialized));
+                let rhs_expr = arm.rhs();
+                let rhs = if let Some(r) = &rhs_expr {
+                    self.elaborate_term(r, Some(&specialized))
+                } else {
+                    self.erroneous_term()
+                };
                 PatternRow::new(patterns, rhs)
             })
             .collect::<Vec<_>>();
@@ -1376,26 +1410,21 @@ impl ElabState {
         }
     }
 
-
-    fn elaborate_pattern(&mut self, pattern: &SyntaxPattern, expected_type: &Term) -> Pattern {
+    fn elaborate_pattern(&mut self, pattern: &ast::Pattern, expected_type: &Term) -> Pattern {
+        let span = pattern.span(self.file);
         match pattern {
-            SyntaxPattern::Var(name, _) => {
-                // If it's a variable, we just create a free var for it
-                let (fvar, _type) = self.fresh_fvar(name.clone(), expected_type.clone());
+            ast::Pattern::Var(v) => {
+                let name = v.name().unwrap_or("_").to_string();
+                let (fvar, _type) = self.fresh_fvar(name, expected_type.clone());
                 Pattern::Var(Some(fvar))
             }
-            SyntaxPattern::Constructor {
-                namespace,
-                name,
-                args,
-                span,
-            } => {
-                // First we resolve the constructor that is being matched against
-                let resolved = self.resolve_name(namespace, name);
+            ast::Pattern::Ctor(c) => {
+                let (namespace, name) = c.qualified_parts();
+                let resolved = self.resolve_name(&namespace, name);
                 let Some((ctor_qname, ctor_type)) = resolved else {
                     self.errors.push(ElabError::new(
-                        ElabErrorKind::UndefinedConstructor(name.clone()),
-                        *span,
+                        ElabErrorKind::UndefinedConstructor(name.to_string()),
+                        span,
                     ));
                     return Pattern::Var(None);
                 };
@@ -1407,17 +1436,17 @@ impl ElabState {
                     self.insert_implicit_args(Term::Const(ctor_qname.clone()), ctor_type.clone());
                 let num_implicits = count_leading_implicits(&ctor_type_before);
 
+                let args: Vec<_> = c.args().collect();
                 let mut current_type = reduce::whnf(self, &ctor_type);
                 let mut arg_types = Vec::new();
-                // Peel off Pi types for each argument in the pattern, collecting their types
-                for _ in args {
+                for _ in &args {
                     if let Term::Pi(_, param_ty, body_ty) = current_type {
                         arg_types.push(*param_ty);
                         current_type = reduce::whnf(self, &body_ty);
                     } else {
                         self.errors.push(ElabError::new(
                             ElabErrorKind::NotAConstructorType(current_type.clone()),
-                            *span,
+                            span,
                         ));
                         break;
                     }
@@ -1430,7 +1459,7 @@ impl ElabState {
                             expected: expected_type.clone(),
                             found: current_type.clone(),
                         },
-                        *span,
+                        span,
                     ));
                 }
 
@@ -1457,9 +1486,18 @@ impl ElabState {
                     type_: ctor_type,
                 }
             }
-            SyntaxPattern::Wildcard(_) => Pattern::Var(None),
-            SyntaxPattern::Lit(value, _) => Pattern::Lit(value.clone()),
-            u => todo!("unsupported pattern: {:?}", u),
+            ast::Pattern::Wildcard(_) => Pattern::Var(None),
+            ast::Pattern::Lit(lit) => {
+                let value = lit.literal().unwrap_or(Literal::Nat(0));
+                Pattern::Lit(value)
+            }
+            _ => {
+                self.errors.push(ElabError::new(
+                    ElabErrorKind::UnsupportedSyntax,
+                    span,
+                ));
+                Pattern::Var(None)
+            }
         }
     }
 
@@ -1637,25 +1675,25 @@ impl ElabState {
         }
     }
 
-    fn elaborate_alias(
-        &mut self,
-        name: &str,
-        binders: &[SyntaxBinder],
-        type_ann: Option<&SyntaxExpr>,
-        value: &SyntaxExpr,
-        span: Span,
-    ) {
-        let name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+    fn elaborate_alias(&mut self, d: &AliasDecl) {
+        let name_str = d.name().unwrap_or("_");
+        let span = d.span(self.file);
+        let name = QualifiedName::User(self.gen_.fresh(name_str.to_string()));
         let saved_lctx = self.lctx.clone();
-        let binder_fvars = self.elaborate_binders(binders);
+        let binder_fvars = self.elaborate_binders_iter(d.binders());
 
-        let elaborated_type_ann = if let Some(type_ann) = type_ann {
-            let ty = self.elaborate_term(type_ann, None);
+        let elaborated_type_ann = if let Some(type_ann) = d.type_ann() {
+            let ty = self.elaborate_term(&type_ann, None);
             Some(Self::abstract_binders(&binder_fvars, ty))
         } else {
             None
         };
-        let (elaborated_value, value_type) = self.elaborate_term_inner(value);
+        let value_expr = d.value();
+        let (elaborated_value, value_type) = if let Some(v) = &value_expr {
+            self.elaborate_term_inner(v)
+        } else {
+            (self.erroneous_term(), self.erroneous_term())
+        };
         if let Some(type_ann) = &elaborated_type_ann
             && !self.unify(type_ann, &value_type)
         {
@@ -1708,17 +1746,17 @@ impl ElabState {
     fn optionally_register_lang_item(
         &mut self,
         name: &QualifiedName,
-        attributes: &[SyntaxAttribute],
+        attributes: &[Attribute],
     ) {
         for attr in attributes {
-            if attr.name == "wired_in"
-                && let Some(arg) = attr.args.first()
-                && let SyntaxExpr::Lit {
-                    value: Literal::Str(item_name),
-                    ..
-                } = arg
-            {
-                self.lang_items.insert(item_name, name.clone());
+            if attr.name() == Some("wired_in") {
+                if let Some(arg) = attr.args().next() {
+                    if let Expr::Lit(lit) = &arg {
+                        if let Some(Literal::Str(item_name)) = lit.literal() {
+                            self.lang_items.insert(&item_name, name.clone());
+                        }
+                    }
+                }
             }
         }
     }
@@ -1779,12 +1817,14 @@ impl ElabState {
 /// a fully elaborated [`Environment`] or a list of accumulated [`ElabError`]s.
 pub fn elaborate_file(
     module_id: ModuleId,
-    tree: &SyntaxTree,
+    root: &SyntaxNodeR,
+    file: usize,
 ) -> Result<Environment, Vec<ElabError>> {
-    let mut state = ElabState::new(module_id);
+    let mut state = ElabState::new(module_id, file);
+    let source_file = SourceFile::from(root);
 
-    for decl in &tree.declarations {
-        state.elaborate_declaration(decl);
+    for decl in source_file.declarations() {
+        state.elaborate_declaration(&decl);
     }
 
     if state.errors.is_empty() {
