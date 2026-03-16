@@ -20,6 +20,7 @@ fn to_sk(kind: TokenKind) -> SyntaxKind {
         TokenKind::Number => SyntaxKind::Number,
         TokenKind::String => SyntaxKind::StringLit,
         TokenKind::Equal => SyntaxKind::Equal,
+        TokenKind::Assign => SyntaxKind::Assign,
         TokenKind::Struct => SyntaxKind::StructKw,
         TokenKind::Eval => SyntaxKind::EvalKw,
         TokenKind::Record => SyntaxKind::RecordKw,
@@ -323,7 +324,7 @@ fn parse_def(p: &mut Parser) {
 }
 
 fn parse_def_body(p: &mut Parser) {
-    if p.at(TokenKind::Equal) {
+    if p.at(TokenKind::Assign) {
         p.start_node(SyntaxKind::DefBody);
         p.bump();
         parse_expr(p);
@@ -337,7 +338,7 @@ fn parse_def_body(p: &mut Parser) {
         p.errors.push(ParseError {
             kind: ParseErrorKind::UnexpectedToken,
             span,
-            expected: alloc::vec![TokenKind::Equal, TokenKind::Pipe],
+            expected: alloc::vec![TokenKind::Assign, TokenKind::Pipe],
             found: Some(p.peek()),
         });
     }
@@ -453,7 +454,7 @@ fn parse_instance_members(p: &mut Parser) {
     while p.at(TokenKind::LowerIdentifier) {
         p.start_node(SyntaxKind::InstanceMember);
         p.bump();
-        p.expect(TokenKind::Equal);
+        p.expect(TokenKind::Assign);
         parse_expr(p);
         p.finish_node();
         if !p.at(TokenKind::Comma) { break; }
@@ -469,7 +470,7 @@ fn parse_alias(p: &mut Parser) {
         p.bump();
         parse_expr(p);
     }
-    p.expect(TokenKind::Equal);
+    p.expect(TokenKind::Assign);
     parse_expr(p);
 }
 
@@ -756,7 +757,7 @@ fn parse_let(p: &mut Parser) {
         p.bump();
         parse_expr(p);
     }
-    p.expect(TokenKind::Equal);
+    p.expect(TokenKind::Assign);
     parse_expr(p);
     p.expect(TokenKind::In);
     parse_expr(p);
@@ -767,7 +768,7 @@ fn parse_cmp(p: &mut Parser) {
     let cp = p.checkpoint();
     parse_add(p);
     match p.peek() {
-        TokenKind::EqualEqual | TokenKind::BangEqual | TokenKind::LessEqual
+        TokenKind::Equal | TokenKind::EqualEqual | TokenKind::BangEqual | TokenKind::LessEqual
         | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::Greater => {
             p.start_node_at(cp, SyntaxKind::InfixExpr);
             p.bump();

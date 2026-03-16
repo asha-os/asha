@@ -4,11 +4,6 @@ inductive Nat {
     succ : Nat -> Nat,
 }
 
-class Eq (a : Type) {
-    @[wired_in "eq"]
-    eq : a -> a -> Prop,
-}
-
 class Gt (a : Type) {
     @[wired_in "gt"]
     gt : a -> a -> Prop,
@@ -30,17 +25,19 @@ def gt : Nat -> Nat -> Prop
     | Nat::succ _, Nat::zero => True
     | Nat::succ x, Nat::succ y => gt x y
 
-def eq : Nat -> Nat -> Prop
-    | Nat::zero, Nat::zero => True
-    | Nat::zero, Nat::succ _ => False
-    | Nat::succ _, Nat::zero => False
-    | Nat::succ x, Nat::succ y => eq x y
+@[wired_in "types.eq"]
+inductive Eq {ty : Type} (value : ty) : ty → Prop {
+    refl : Eq value value
+}
 
-def proof_of_true : True = True::trivial
+def proof_of_true : True := True::trivial
 
-def lt1 : gt 1 0 = True::trivial
+def lt1 : gt 1 0 := True::trivial
 
-def xplus1bigger : (x : Nat) -> gt (add x 1) 1
+def succ_greater : (x : Nat) -> gt (add x 1) 1
     | Nat::zero => True::trivial
     | Nat::succ x => True::trivial
     
+def identity (h : Prop) : h -> h := λ(p : h) => p
+
+def eq_refl (x : Nat) : x = x := Eq::refl

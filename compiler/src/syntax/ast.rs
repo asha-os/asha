@@ -912,6 +912,7 @@ impl<'a> InfixExpr<'a> {
                 SyntaxKind::Minus => Some(InfixOp::Sub),
                 SyntaxKind::Star => Some(InfixOp::Mul),
                 SyntaxKind::Slash => Some(InfixOp::Div),
+                SyntaxKind::Equal => Some(InfixOp::Eq),
                 SyntaxKind::EqualEqual => Some(InfixOp::Eq),
                 SyntaxKind::BangEqual => Some(InfixOp::Neq),
                 SyntaxKind::Less => Some(InfixOp::Lt),

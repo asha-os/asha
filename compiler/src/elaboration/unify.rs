@@ -98,7 +98,7 @@ fn structural_eq_level(a: &Level, b: &Level) -> bool {
 /// Recursively traverses the term, and whenever an `MVar` is encountered that
 /// has been assigned in `state.mctx`, substitutes its value (and recurses into
 /// that value to handle chains of assignments).
-fn instantiate_mvars(state: &ElabState, term: &Term) -> Term {
+pub fn instantiate_mvars(state: &ElabState, term: &Term) -> Term {
     match term {
         Term::MVar(u) => {
             if let Some(val) = state.mctx.get_assignment(u) {

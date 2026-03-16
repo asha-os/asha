@@ -544,7 +544,10 @@ impl ElabState {
             None => self.erroneous_term(),
         };
 
-        let mut value = elaborated_body;
+        let elaborated_return_type = unify::instantiate_mvars(self, &elaborated_return_type);
+        let pi_type = Self::abstract_binders(&binder_fvars, elaborated_return_type);
+
+        let mut value = unify::instantiate_mvars(self, &elaborated_body);
         for (fvar, _, _) in binder_fvars.iter().rev() {
             value = subst::abstract_fvar(&value, fvar.clone());
         }
@@ -698,7 +701,7 @@ impl ElabState {
                     InfixOp::Sub => "sub",
                     InfixOp::Mul => "mul",
                     InfixOp::Div => "div",
-                    InfixOp::Eq => "eq",
+                    InfixOp::Eq => "types.eq",
                     InfixOp::Neq => "neq",
                     InfixOp::Lt => "lt",
                     InfixOp::Leq => "leq",
@@ -1221,6 +1224,8 @@ impl ElabState {
             } else {
                 Term::Const(inductive_name.clone())
             };
+
+            let base_type = unify::instantiate_mvars(self, &base_type);
 
             // Inductive parameters are always implicit in constructor types
             let implicit_binders: Vec<_> = binders

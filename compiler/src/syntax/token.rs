@@ -14,6 +14,7 @@ pub enum TokenKind {
     Number,
     String,
     Equal,
+    Assign,
     Struct,
     Eval,
     Record,

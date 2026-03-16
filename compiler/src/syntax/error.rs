@@ -120,6 +120,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Number => write!(f, "number"),
             TokenKind::String => write!(f, "string"),
             TokenKind::Equal => write!(f, "`=`"),
+            TokenKind::Assign => write!(f, "`:=`"),
             TokenKind::Struct => write!(f, "`struct`"),
             TokenKind::Record => write!(f, "`record`"),
             TokenKind::Extern => write!(f, "`extern`"),
