@@ -90,7 +90,7 @@ pub enum SyntaxKind {
     InfixExpr,
     RecordLitExpr,
     MatchExpr,
-    QualifiedName,
+    Name,
     RecordField,
     RecordFieldList,
     InstanceMember,

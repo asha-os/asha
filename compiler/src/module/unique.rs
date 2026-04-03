@@ -1,31 +1,22 @@
 use alloc::string::String;
 
-use crate::module::ModuleId;
+use crate::module::{ModuleId, name::Name};
 
 #[derive(Debug, Clone)]
 pub struct Unique {
     pub id: usize,
     pub module_id: ModuleId,
-    pub display_name: Option<String>,
 }
 
 impl Unique {
     #[must_use]
-    pub const fn new(id: usize, module_id: ModuleId, display_name: Option<String>) -> Self {
-        Self {
-            id,
-            module_id,
-            display_name,
-        }
+    pub const fn new(id: usize, module_id: ModuleId) -> Self {
+        Self { id, module_id }
     }
 
     #[must_use]
     pub fn unnamed(id: usize, module_id: ModuleId) -> Self {
-        Self {
-            id,
-            module_id,
-            display_name: None,
-        }
+        Self { id, module_id }
     }
 }
 
@@ -64,10 +55,15 @@ impl UniqueGen {
         Self { module_id, next: 0 }
     }
 
-    pub fn fresh(&mut self, name: String) -> Unique {
+    pub fn fresh(&mut self) -> Unique {
         let id = self.next;
         self.next += 1;
-        Unique::new(id, self.module_id.clone(), Some(name))
+        Unique::new(id, self.module_id.clone())
+    }
+
+    pub fn fresh_name(&mut self, name: String) -> Name {
+        let unique = self.fresh();
+        Name::new(unique, name)
     }
 
     pub fn fresh_unnamed(&mut self) -> Unique {

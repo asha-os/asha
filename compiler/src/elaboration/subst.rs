@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use crate::{
-    module::{name::QualifiedName, unique::Unique},
+    module::{name::Name, unique::Unique},
     spine::Term,
 };
 
@@ -226,7 +226,7 @@ fn collect_app_spine(term: &Term) -> (&Term, Vec<&Term>) {
 #[must_use]
 pub fn replace_rec_call(
     term: &Term,
-    fn_name: &QualifiedName,
+    fn_name: &Name,
     structural_arg: &Unique,
     replacement: &Term,
 ) -> Term {

@@ -51,7 +51,7 @@ use crate::{
     },
     module::{
         ModuleId,
-        name::QualifiedName,
+        name::Name,
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Level, Literal, Term, uncurry},
@@ -67,13 +67,13 @@ use crate::{
 
 /// A hierarchical namespace for name resolution.
 ///
-/// Each namespace maps short display names to their [`QualifiedName`],
+/// Each namespace maps short display names to their [`Name`],
 /// and may contain child namespaces. This forms a tree
 /// that mirrors the module/record/class/inductive structure of the source program.
 #[derive(Debug, Clone)]
 pub struct Namespace {
     /// Top-level declarations visible in this namespace, keyed by display name.
-    pub decls: BTreeMap<String, QualifiedName>,
+    pub decls: BTreeMap<String, Name>,
     /// Child namespaces (e.g. record fields, class methods, inductive constructors).
     pub children: BTreeMap<String, Namespace>,
 }
@@ -89,7 +89,7 @@ impl Namespace {
 
     /// Looks up a declaration in this namespace by its display name.
     #[must_use]
-    pub fn lookup_decl(&self, name: &str) -> Option<&QualifiedName> {
+    pub fn lookup_decl(&self, name: &str) -> Option<&Name> {
         self.decls.get(name)
     }
 
@@ -112,7 +112,7 @@ impl Namespace {
 
     /// Resolves a qualified reference by walking the namespace `path` and then looking up `member`.
     #[must_use]
-    pub fn resolve(&self, path: &[String], member: &str) -> Option<&QualifiedName> {
+    pub fn resolve(&self, path: &[String], member: &str) -> Option<&Name> {
         self.walk(path)?.lookup_decl(member)
     }
 }
@@ -124,7 +124,7 @@ impl Default for Namespace {
 }
 
 /// The registry of built-in primitive types, operations, and type class instances.
-pub struct LanguageItems(BTreeMap<String, QualifiedName>);
+pub struct LanguageItems(BTreeMap<String, Name>);
 
 impl Default for LanguageItems {
     fn default() -> Self {
@@ -138,22 +138,22 @@ impl LanguageItems {
         Self(BTreeMap::new())
     }
 
-    pub fn insert(&mut self, name: &str, qname: QualifiedName) {
+    pub fn insert(&mut self, name: &str, qname: Name) {
         self.0.insert(name.to_string(), qname);
     }
 
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<&QualifiedName> {
+    pub fn get(&self, name: &str) -> Option<&Name> {
         self.0.get(name)
     }
 
     #[must_use]
-    pub fn get_string(&self) -> Option<&QualifiedName> {
+    pub fn get_string(&self) -> Option<&Name> {
         self.get("string")
     }
 
     #[must_use]
-    pub fn get_nat(&self) -> Option<&QualifiedName> {
+    pub fn get_nat(&self) -> Option<&Name> {
         self.get("nat")
     }
 }
@@ -167,47 +167,47 @@ pub struct Environment {
     /// The module this environment belongs to.
     pub module_id: ModuleId,
     /// Externally-provided declarations. Maps name to its type.
-    pub externals: BTreeMap<QualifiedName, Term>,
+    pub externals: BTreeMap<Name, Term>,
     /// All declarations elaborated in this module (definitions, constructors, etc.).
-    pub decls: BTreeMap<QualifiedName, Declaration>,
+    pub decls: BTreeMap<Name, Declaration>,
     /// All aliases, maps them to their elaborated values and types
-    pub aliases: BTreeMap<QualifiedName, (Term, Term)>,
+    pub aliases: BTreeMap<Name, (Term, Term)>,
     /// The root of the namespace tree for name resolution.
     pub root_namespace: Namespace,
     /// Metadata for inductive types.
-    pub inductives: BTreeMap<QualifiedName, InductiveMetadata>,
+    pub inductives: BTreeMap<Name, InductiveMetadata>,
     /// Reverse lookup of match functions to inductive name
-    pub match_fns: BTreeMap<QualifiedName, QualifiedName>,
+    pub match_fns: BTreeMap<Name, Name>,
 }
 
 impl Environment {
-    /// Looks up a declaration by its [`QualifiedName`]. Only searches module-local declarations,
+    /// Looks up a declaration by its [`Name`]. Only searches module-local declarations,
     /// not externals.
     #[must_use]
-    pub fn lookup(&self, name: &QualifiedName) -> Option<&Declaration> {
+    pub fn lookup(&self, name: &Name) -> Option<&Declaration> {
         self.decls.get(name)
     }
 
     /// Looks up the type of a name, searching both module-local declarations and externals.
-    /// Returns the canonical [`QualifiedName`] and its type.
+    /// Returns the canonical [`Name`] and its type.
     #[must_use]
-    pub fn lookup_type(&self, qname: &QualifiedName) -> Option<(&QualifiedName, &Term)> {
+    pub fn lookup_type(&self, qname: &Name) -> Option<(&Name, &Term)> {
         self.decls
             .get(qname)
             .map(|decl| (decl.name(), decl.type_()))
             .or_else(|| self.externals.get_key_value(qname))
     }
 
-    /// Looks up an alias by its [`QualifiedName`].
+    /// Looks up an alias by its [`Name`].
     /// Returns the elaborated value and its type.
     #[must_use]
-    pub fn lookup_alias(&self, qname: &QualifiedName) -> Option<(&Term, &Term)> {
+    pub fn lookup_alias(&self, qname: &Name) -> Option<(&Term, &Term)> {
         self.aliases.get(qname).map(|(value, type_)| (value, type_))
     }
 
     /// Looks up an inductive type's metadata by its qualified name.
     #[must_use]
-    pub fn lookup_inductive(&self, qname: &QualifiedName) -> Option<&InductiveMetadata> {
+    pub fn lookup_inductive(&self, qname: &Name) -> Option<&InductiveMetadata> {
         self.inductives.get(qname)
     }
 }
@@ -217,29 +217,21 @@ impl Environment {
 pub enum Declaration {
     /// A function or value definition with a known body.
     Definition {
-        name: QualifiedName,
+        name: Name,
         type_: Term,
         value: Term,
         span: Span,
     },
     /// A declaration that has a type but no reducible body, they are opaque constants.
-    Constructor {
-        name: QualifiedName,
-        type_: Term,
-        span: Span,
-    },
+    Constructor { name: Name, type_: Term, span: Span },
     /// A forward-declared definition whose body we don't want to unfold for some reason.
-    Opaque {
-        name: QualifiedName,
-        type_: Term,
-        span: Span,
-    },
+    Opaque { name: Name, type_: Term, span: Span },
 }
 
 impl Declaration {
-    /// Returns the declaration's [`QualifiedName`].
+    /// Returns the declaration's [`Name`].
     #[must_use]
-    pub fn name(&self) -> &QualifiedName {
+    pub fn name(&self) -> &Name {
         match self {
             Declaration::Definition { name, .. }
             | Declaration::Constructor { name, .. }
@@ -320,7 +312,7 @@ impl ElabState {
     /// onto the local context, and returns both the [`Unique`] and `Term::FVar`.
     pub fn fresh_fvar(&mut self, name: String, type_: Term) -> (Unique, Term) {
         let u = self.lctx.push_binder(name, type_, &mut self.gen_);
-        (u.clone(), Term::FVar(u))
+        (u.id.clone(), Term::FVar(u.id))
     }
 
     /// Produces a throwaway metavariable term used as a placeholder after an error.
@@ -328,12 +320,12 @@ impl ElabState {
         Term::MVar(self.gen_.fresh_unnamed())
     }
 
-    /// Resolves a name to its [`QualifiedName`] and type using multi-level lookup:
+    /// Resolves a name to its [`Name`] and type using multi-level lookup:
     /// 1. If an explicit namespace path is given, look it up directly.
     /// 2. Try the current namespace (e.g. inside a record or class body).
     /// 3. Try each opened namespace in order.
     /// 4. Fall back to the root namespace.
-    fn resolve_name(&self, namespace: &[String], member: &str) -> Option<(&QualifiedName, &Term)> {
+    fn resolve_name(&self, namespace: &[String], member: &str) -> Option<(&Name, &Term)> {
         let ns = &self.env.root_namespace;
 
         if !namespace.is_empty() {
@@ -361,11 +353,7 @@ impl ElabState {
             .and_then(|qn| self.env.lookup_type(qn))
     }
 
-    fn resolve_alias(
-        &self,
-        namespace: &[String],
-        member: &str,
-    ) -> Option<(&QualifiedName, &Term, &Term)> {
+    fn resolve_alias(&self, namespace: &[String], member: &str) -> Option<(&Name, &Term, &Term)> {
         let ns = &self.env.root_namespace;
 
         if !namespace.is_empty() {
@@ -474,7 +462,7 @@ impl ElabState {
 
     /// Elaborates a `def` declaration.
     ///
-    /// 1. Generates a fresh [`QualifiedName`] for the definition.
+    /// 1. Generates a fresh [`Name`] for the definition.
     /// 2. Saves the local context, elaborates binders, return type, and body.
     /// 3. Abstracts the binders into a Pi type and lambda body.
     /// 4. Registers the definition in the environment and namespace.
@@ -482,7 +470,7 @@ impl ElabState {
     fn elaborate_def(&mut self, d: &DefDecl) {
         let name = d.name().unwrap_or("_");
         let span = d.span(self.file);
-        let def_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let def_name = self.gen_.fresh_name(name.to_string());
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders_iter(d.binders());
@@ -615,7 +603,7 @@ impl ElabState {
                 if namespace.is_empty()
                     && let Some(decl) = self.lctx.lookup_name(member)
                 {
-                    return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
+                    return (Term::FVar(decl.fvar.id.clone()), decl.type_.clone());
                 }
 
                 if let Some((name, type_)) = self.resolve_name(&namespace, member) {
@@ -764,7 +752,7 @@ impl ElabState {
                 };
                 let normalized_value_type = reduce::whnf(self, &value_type);
                 if let Some(record_name) = head_const(&normalized_value_type) {
-                    let namespace = record_name.display().unwrap().to_string();
+                    let namespace = record_name.name.clone();
                     if let Some((proj_fn_name, proj_fn_type)) =
                         self.resolve_name(slice::from_ref(&namespace), field)
                     {
@@ -870,10 +858,8 @@ impl ElabState {
                 (pi_type, Term::type0())
             }
             _ => {
-                self.errors.push(ElabError::new(
-                    err::ElabErrorKind::UnsupportedSyntax,
-                    span,
-                ));
+                self.errors
+                    .push(ElabError::new(err::ElabErrorKind::UnsupportedSyntax, span));
                 (self.erroneous_term(), self.erroneous_term())
             }
         }
@@ -913,12 +899,7 @@ impl ElabState {
     ///
     /// First elaborates `fun`, inserts any implicit arguments, then elaborates
     /// `arg` against the expected parameter type and instantiates the return type.
-    fn elaborate_app(
-        &mut self,
-        syntax: &Expr,
-        fun: &Expr,
-        arg: &Expr,
-    ) -> (Term, Term) {
+    fn elaborate_app(&mut self, syntax: &Expr, fun: &Expr, arg: &Expr) -> (Term, Term) {
         let (term, fn_type) = self.elaborate_term_inner(fun);
         let (term, fn_type) = self.insert_implicit_args(term, fn_type);
 
@@ -952,7 +933,7 @@ impl ElabState {
     fn elaborate_record(&mut self, d: &RecordDecl) {
         let name = d.name().unwrap_or("_");
         let span = d.span(self.file);
-        let record_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let record_name = self.gen_.fresh_name(name.to_string());
         let mut child_ns = Namespace::new();
 
         let saved_lctx = self.lctx.clone();
@@ -968,10 +949,10 @@ impl ElabState {
         );
 
         let fields: Vec<_> = d.fields().collect();
-        let mut field_data: Vec<(String, QualifiedName, Term)> = Vec::new();
+        let mut field_data: Vec<(String, Name, Term)> = Vec::new();
         for field in &fields {
             let field_name = field.name().unwrap_or("_").to_string();
-            let field_qname = QualifiedName::User(self.gen_.fresh(field_name.clone()));
+            let field_qname = self.gen_.fresh_name(field_name.clone());
             let field_type = if let Some(ty) = field.type_ann() {
                 self.elaborate_term(&ty, None)
             } else {
@@ -1029,7 +1010,7 @@ impl ElabState {
     }
 
     /// Registers a declaration in the appropriate namespace (root or current).
-    fn register_in_namespace(&mut self, display_name: &str, qname: QualifiedName) {
+    fn register_in_namespace(&mut self, display_name: &str, qname: Name) {
         let ns = if self.current_namespace.is_empty() {
             &mut self.env.root_namespace
         } else {
@@ -1051,7 +1032,7 @@ impl ElabState {
         } else {
             self.erroneous_term()
         };
-        let qname = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let qname = self.gen_.fresh_name(name.to_string());
         self.env.externals.insert(qname.clone(), elaborated_type);
         self.register_in_namespace(name, qname);
     }
@@ -1066,7 +1047,7 @@ impl ElabState {
         &mut self,
         attributes: &[Attribute],
         name: &str,
-        ind_name: &QualifiedName,
+        ind_name: &Name,
         binder_fvars: &[(Unique, BinderInfo, Term)],
         index_type: Term,
         span: Span,
@@ -1091,8 +1072,8 @@ impl ElabState {
         type_: Term,
         namespace: &mut Namespace,
         span: Span,
-    ) -> (QualifiedName, Term) {
-        let ctor_name = QualifiedName::User(self.gen_.fresh(display_name.to_string()));
+    ) -> (Name, Term) {
+        let ctor_name = self.gen_.fresh_name(display_name.to_string());
         self.env.decls.insert(
             ctor_name.clone(),
             Declaration::Constructor {
@@ -1111,16 +1092,16 @@ impl ElabState {
     fn register_inductive(
         &mut self,
         name: &str,
-        ind_name: QualifiedName,
+        ind_name: Name,
         binder_fvars: &[(Unique, BinderInfo, Term)],
-        constructors: Vec<(QualifiedName, Term)>,
+        constructors: Vec<(Name, Term)>,
         mut namespace: Namespace,
         span: Span,
     ) {
         let (constructor_names, constructor_types): (Vec<_>, Vec<_>) =
             constructors.into_iter().unzip();
 
-        let match_fn_name = QualifiedName::User(self.gen_.fresh("match".into()));
+        let match_fn_name = self.gen_.fresh_name("match".into());
         let match_fn_type = self.generate_match_fn_type(
             &ind_name,
             binder_fvars,
@@ -1168,7 +1149,7 @@ impl ElabState {
     fn elaborate_inductive(&mut self, d: &InductiveDecl) {
         let name = d.name().unwrap_or("_");
         let span = d.span(self.file);
-        let ind_name = QualifiedName::User(self.gen_.fresh(name.to_string()));
+        let ind_name = self.gen_.fresh_name(name.to_string());
         let saved_lctx = self.lctx.clone();
 
         let attributes: Vec<_> = d.attributes().collect();
@@ -1178,7 +1159,14 @@ impl ElabState {
         } else {
             Term::type0()
         };
-        self.register_inductive_type(&attributes, name, &ind_name, &binder_fvars, index_type, span);
+        self.register_inductive_type(
+            &attributes,
+            name,
+            &ind_name,
+            &binder_fvars,
+            index_type,
+            span,
+        );
 
         let mut namespace = Namespace::new();
         let constructors: Vec<_> = d.constructors().collect();
@@ -1208,14 +1196,14 @@ impl ElabState {
     fn elaborate_inductive_constructors(
         &mut self,
         inductive_namespace: &mut Namespace,
-        inductive_name: &QualifiedName,
+        inductive_name: &Name,
         binders: &[(Unique, BinderInfo, Term)],
         constructors: &[InductiveCtor],
-    ) -> Vec<(QualifiedName, Term)> {
+    ) -> Vec<(Name, Term)> {
         let mut constructor_data = Vec::new();
         for constructor in constructors {
             let ctor_display_name = constructor.name().unwrap_or("_").to_string();
-            let ctor_name = QualifiedName::User(self.gen_.fresh(ctor_display_name.clone()));
+            let ctor_name = self.gen_.fresh_name(ctor_display_name.clone());
             let saved_lctx = self.lctx.clone();
             let ctor_binder_fvars = self.elaborate_binders_iter(constructor.binders());
 
@@ -1265,7 +1253,7 @@ impl ElabState {
     fn elaborate_class(&mut self, d: &ClassDecl) {
         let name_str = d.name().unwrap_or("_");
         let span = d.span(self.file);
-        let name = QualifiedName::User(self.gen_.fresh(name_str.to_string()));
+        let name = self.gen_.fresh_name(name_str.to_string());
         let mut child_ns = Namespace::new();
         let saved_lctx = self.lctx.clone();
 
@@ -1286,7 +1274,7 @@ impl ElabState {
         let members: Vec<_> = d.members().collect();
         for member in members.iter().rev() {
             let field_display_name = member.name().unwrap_or("_").to_string();
-            let field_name = QualifiedName::User(self.gen_.fresh(field_display_name.clone()));
+            let field_name = self.gen_.fresh_name(field_display_name.clone());
             let field_type = if let Some(ty) = member.type_ann() {
                 self.elaborate_term(&ty, None)
             } else {
@@ -1349,7 +1337,7 @@ impl ElabState {
         scrutinees: Vec<Scrutinee>,
         arms: &[PatternMatchArm],
         expected_type: Term,
-        match_fn: Option<QualifiedName>,
+        match_fn: Option<Name>,
         span: Span,
     ) -> Term {
         let mut motive = expected_type.clone();
@@ -1497,10 +1485,8 @@ impl ElabState {
                 Pattern::Lit(value)
             }
             _ => {
-                self.errors.push(ElabError::new(
-                    ElabErrorKind::UnsupportedSyntax,
-                    span,
-                ));
+                self.errors
+                    .push(ElabError::new(ElabErrorKind::UnsupportedSyntax, span));
                 Pattern::Var(None)
             }
         }
@@ -1509,9 +1495,9 @@ impl ElabState {
     /// Generates the type of the match/elimination function for an inductive type.
     fn generate_match_fn_type(
         &mut self,
-        inductive_name: &QualifiedName,
+        inductive_name: &Name,
         binder_fvars: &[(Unique, BinderInfo, Term)],
-        constructor_names: &[QualifiedName],
+        constructor_names: &[Name],
         constructors_types: &[Term],
     ) -> Term {
         let motive_type = Term::mk_pi(
@@ -1562,8 +1548,8 @@ impl ElabState {
 
     /// Builds the branch type for a single constructor in the match function.
     fn build_branch_type(
-        ctor_name: &QualifiedName,
-        inductive_name: &QualifiedName,
+        ctor_name: &Name,
+        inductive_name: &Name,
         ctor_type: &Term,
         num_params: usize,
         motive: &Term,
@@ -1617,9 +1603,9 @@ impl ElabState {
     /// Generates a field projection definition for a record type
     fn elaborate_field_definition(
         &mut self,
-        field_name: &QualifiedName,
-        record_name: &QualifiedName,
-        match_fn: &QualifiedName,
+        field_name: &Name,
+        record_name: &Name,
+        match_fn: &Name,
         all_field_types: &[Term],
         field_index: usize,
         field_type: &Term,
@@ -1683,7 +1669,7 @@ impl ElabState {
     fn elaborate_alias(&mut self, d: &AliasDecl) {
         let name_str = d.name().unwrap_or("_");
         let span = d.span(self.file);
-        let name = QualifiedName::User(self.gen_.fresh(name_str.to_string()));
+        let name = self.gen_.fresh_name(name_str.to_string());
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders_iter(d.binders());
 
@@ -1748,11 +1734,7 @@ impl ElabState {
     }
 
     /// Checks for a `#[wired_in("item_name")]` attribute and, if found, registers the given name as the implementation of that lang item
-    fn optionally_register_lang_item(
-        &mut self,
-        name: &QualifiedName,
-        attributes: &[Attribute],
-    ) {
+    fn optionally_register_lang_item(&mut self, name: &Name, attributes: &[Attribute]) {
         for attr in attributes {
             if attr.name() == Some("wired_in") {
                 if let Some(arg) = attr.args().next() {

@@ -1,15 +1,15 @@
 use alloc::{collections::btree_map::BTreeMap, string::String, vec::Vec};
 
 use crate::{
-    module::unique::{Unique, UniqueGen},
+    module::{name::Name, unique::{Unique, UniqueGen}},
     spine::{Level, Term},
 };
 
 #[derive(Debug, Clone)]
 /// Represents a local declaration, which can be either a binder (with no value) or a let-binding (with a value)
 pub struct LocalDecl {
-    /// The unique identifier for this local declaration
-    pub fvar: Unique,
+    /// The name for this local declaration
+    pub fvar: Name,
     /// The type of the local declaration
     pub type_: Term,
     /// The value of the local declaration, if it is a let-binding. None if it is a binder.
@@ -30,8 +30,8 @@ impl LocalContext {
     }
 
     /// Pushes a new binder onto the local context. This creates a new unique variable for the binder and adds it to the context with its type.
-    pub fn push_binder(&mut self, name: String, type_: Term, gen_: &mut UniqueGen) -> Unique {
-        let fvar = gen_.fresh(name);
+    pub fn push_binder(&mut self, name: String, type_: Term, gen_: &mut UniqueGen) -> Name {
+        let fvar = gen_.fresh_name(name);
         self.decls.push(LocalDecl {
             fvar: fvar.clone(),
             type_,
@@ -47,8 +47,8 @@ impl LocalContext {
         type_: Term,
         value: Term,
         gen_: &mut UniqueGen,
-    ) -> Unique {
-        let fvar = gen_.fresh(name);
+    ) -> Name {
+        let fvar = gen_.fresh_name(name);
         self.decls.push(LocalDecl {
             fvar: fvar.clone(),
             type_,
@@ -59,7 +59,7 @@ impl LocalContext {
 
     /// Looks up a local declaration by its unique variable. Returns None if no such declaration exists in the context.
     #[must_use]
-    pub fn lookup(&self, fvar: &Unique) -> Option<&LocalDecl> {
+    pub fn lookup(&self, fvar: &Name) -> Option<&LocalDecl> {
         self.decls.iter().find(|d| &d.fvar == fvar)
     }
 
@@ -68,7 +68,7 @@ impl LocalContext {
     pub fn lookup_name(&self, name: &str) -> Option<&LocalDecl> {
         self.decls
             .iter()
-            .rfind(|d| d.fvar.display_name.as_deref() == Some(name))
+            .rfind(|d| d.fvar.name == name)
     }
 }
 

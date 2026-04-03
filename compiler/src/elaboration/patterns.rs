@@ -9,7 +9,7 @@ use crate::{
         subst, unify,
     },
     module::{
-        name::QualifiedName,
+        name::Name,
         unique::{Unique, UniqueGen},
     },
     spine::{BinderInfo, Literal, Term},
@@ -21,7 +21,7 @@ use crate::{
 pub enum Pattern {
     Var(Option<Unique>),
     Constructor {
-        ctor: QualifiedName,
+        ctor: Name,
         fields: Vec<Pattern>,
         type_: Term,
     },
@@ -57,7 +57,7 @@ pub struct MatchProblem {
     pub rows: Vec<PatternRow>,
     pub return_type: Term,
     pub motive: Term,
-    pub match_fn: Option<QualifiedName>,
+    pub match_fn: Option<Name>,
 }
 
 impl MatchProblem {
@@ -66,7 +66,7 @@ impl MatchProblem {
         scrutinees: Vec<Scrutinee>,
         rows: Vec<PatternRow>,
         return_type: Term,
-        match_fn: Option<QualifiedName>,
+        match_fn: Option<Name>,
     ) -> Self {
         let motive = if let Some(s) = scrutinees.first() {
             Term::mk_lam(BinderInfo::Explicit, s.type_.clone(), return_type.clone())
@@ -274,7 +274,7 @@ fn specialize(
     gen_: &mut UniqueGen,
     problem: &MatchProblem,
     col: usize,
-    ctor: &QualifiedName,
+    ctor: &Name,
     ctor_arity: usize,
     field_types: &[Term],
 ) -> (MatchProblem, Vec<Unique>) {

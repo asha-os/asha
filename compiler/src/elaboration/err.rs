@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use crate::{
-    module::name::QualifiedName,
+    module::name::Name,
     spine::Term,
     syntax::Span,
 };
@@ -60,7 +60,7 @@ pub enum ElabErrorKind {
     TypeExpected(Term),
     NonExhaustiveMatch(Option<Term>),
     NotInductive(Term),
-    UnknownInductive(QualifiedName),
+    UnknownInductive(Name),
     NotAConstructorType(Term),
     ImpossiblePattern {
         expected: Term,

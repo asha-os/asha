@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::{
     elaboration::{Declaration, ElabState, subst},
-    module::name::QualifiedName,
+    module::name::Name,
     spine::{Literal, Term},
 };
 
@@ -209,7 +209,7 @@ fn try_iota(state: &ElabState, term: &Term) -> Option<Term> {
 /// only if the head is a `Term::Const`. Used to identify which record or
 /// inductive type a value belongs to during projection elaboration.
 #[must_use]
-pub fn head_const(term: &Term) -> Option<&QualifiedName> {
+pub fn head_const(term: &Term) -> Option<&Name> {
     match term {
         Term::Const(name) => Some(name),
         Term::App(fun, _) => head_const(fun),
@@ -219,7 +219,7 @@ pub fn head_const(term: &Term) -> Option<&QualifiedName> {
 
 /// Checks if a field type is recursive
 #[must_use]
-pub fn is_recursive_field(field_ty: &Term, inductive_name: &QualifiedName) -> bool {
+pub fn is_recursive_field(field_ty: &Term, inductive_name: &Name) -> bool {
     match field_ty {
         Term::Const(name) => name == inductive_name,
         Term::App(fun, _) => head_const(fun).map_or(false, |n| n == inductive_name),

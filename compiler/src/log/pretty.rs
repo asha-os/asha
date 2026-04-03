@@ -9,7 +9,7 @@ use alloc::{
 
 use crate::{
     elaboration::{Declaration, Environment},
-    module::name::QualifiedName,
+    module::name::Name,
     spine::{BinderInfo, Level, Term},
 };
 
@@ -28,13 +28,13 @@ impl Display for Declaration {
             Declaration::Definition {
                 name, type_, value, ..
             } => {
-                write!(f, "def {} : {} = {}", name.display().unwrap(), type_, value)
+                write!(f, "def {} : {} = {}", name.name, type_, value)
             }
             Declaration::Constructor { name, type_, .. } => {
-                write!(f, "constructor {} : {}", name.display().unwrap(), type_)
+                write!(f, "constructor {} : {}", name.name, type_)
             }
             Declaration::Opaque { name, type_, .. } => {
-                write!(f, "opaque {} : {}", name.display().unwrap(), type_)
+                write!(f, "opaque {} : {}", name.name, type_)
             }
         }
     }
@@ -57,11 +57,8 @@ fn pretty_term_prec(term: &Term, prec: u8) -> String {
     let s = match term {
         Term::MVar(_) => "?_".into(),
         Term::BVar(i) => format!("b{i}"),
-        Term::FVar(unique) => unique
-            .display_name
-            .clone()
-            .map_or_else(|| format!("f{}", unique.id), |name| name),
-        Term::Const(qname) => qname.display().unwrap_or("<unknown>").to_string(),
+        Term::FVar(unique) => format!("f{}", unique.id),
+        Term::Const(qname) => qname.name.clone(),
 
         Term::App(_, _) => {
             let (head, args) = collect_spine(term);
@@ -157,9 +154,9 @@ fn collect_spine(term: &Term) -> (&Term, Vec<&Term>) {
     (cur, args)
 }
 
-impl Display for QualifiedName {
+impl Display for Name {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.display().unwrap_or("<unknown>"))
+        write!(f, "{}", self.name)
     }
 }
 
@@ -207,7 +204,7 @@ impl From<&Level> for DisplayableLevel {
             ),
             Level::MVar(unique) => DisplayableLevel::MVar(unique.id),
             Level::Param(qname) => {
-                DisplayableLevel::Param(qname.display().unwrap_or("<unknown>").to_string())
+                DisplayableLevel::Param(qname.name.clone())
             }
         }
     }
