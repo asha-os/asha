@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use crate::{
-    elaboration::{Declaration, ElabState, subst},
+    elaboration::{Declaration, ElabState, Environment, subst},
     module::name::Name,
     spine::{Literal, Term},
 };
@@ -16,7 +16,7 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
                 whnf(state, &subst::instantiate(body, arg))
             } else {
                 let app = Term::mk_app(f, *arg.clone());
-                if let Some(reduced) = try_iota(state, &app) {
+                if let Some(reduced) = try_iota(&state.env, &app) {
                     whnf(state, &reduced)
                 } else {
                     app
@@ -43,6 +43,35 @@ pub fn whnf(state: &ElabState, term: &Term) -> Term {
     }
 }
 
+/// Reduces a term to weak head normal form using only the environment (no metavariable context).
+/// Used inside `try_iota` to evaluate scrutinees without requiring full `ElabState`.
+fn whnf_env(env: &Environment, term: &Term) -> Term {
+    match term {
+        Term::App(f, arg) => {
+            let f = whnf_env(env, f);
+            if let Term::Lam(_, _, body) = &f {
+                whnf_env(env, &subst::instantiate(body, arg))
+            } else {
+                let app = Term::mk_app(f, *arg.clone());
+                if let Some(reduced) = try_iota(env, &app) {
+                    whnf_env(env, &reduced)
+                } else {
+                    app
+                }
+            }
+        }
+        Term::Let(_, val, body) => whnf_env(env, &subst::instantiate(body, val)),
+        Term::Const(name) => {
+            if let Some(Declaration::Definition { value, .. }) = env.lookup(name) {
+                whnf_env(env, &value.clone())
+            } else {
+                term.clone()
+            }
+        }
+        _ => term.clone(),
+    }
+}
+
 /// Collects the spine of an application into `(head, [arg0, arg1, argN])`.
 fn collect_args(term: &Term) -> (&Term, Vec<&Term>) {
     let mut args = Vec::new();
@@ -56,16 +85,16 @@ fn collect_args(term: &Term) -> (&Term, Vec<&Term>) {
 }
 
 /// Converts a Nat literal to its constructor representation.
-fn nat_lit_to_ctor(state: &ElabState, n: u64) -> Option<Term> {
-    let nat_name = state.lang_items.get_nat()?;
-    let ind = state.env.lookup_inductive(nat_name)?;
+fn nat_lit_to_ctor(env: &Environment, n: u64) -> Option<Term> {
+    let nat_name = env.lang_items.get_nat()?;
+    let ind = env.lookup_inductive(nat_name)?;
 
     // We identify zero and succ by their field count
     let mut zero_ctor = None;
     let mut succ_ctor = None;
 
     for ctor_name in &ind.constructors {
-        let ctor_decl = state.env.lookup(ctor_name)?;
+        let ctor_decl = env.lookup(ctor_name)?;
         let ctor_type = ctor_decl.type_();
 
         let mut ty = ctor_type.clone();
@@ -123,9 +152,9 @@ fn extract_field_types(ctor_type: &Term, num_params: usize, param_args: &[Term])
     field_types
 }
 
-/// Attempts iota-reductionm
+/// Attempts iota reduction.
 /// Returns `Some(reduced)` on success, `None` if reduction cannot fire.
-fn try_iota(state: &ElabState, term: &Term) -> Option<Term> {
+pub fn try_iota(env: &Environment, term: &Term) -> Option<Term> {
     let (head, args) = collect_args(term);
 
     let match_name = match head {
@@ -133,7 +162,12 @@ fn try_iota(state: &ElabState, term: &Term) -> Option<Term> {
         _ => return None,
     };
 
-    let inductive = state.env.lookup_inductive(match_name)?;
+    // Only fire for recursor declarations
+    if !matches!(env.lookup(match_name), Some(Declaration::Recursor { .. })) {
+        return None;
+    }
+
+    let inductive = env.lookup_inductive(match_name)?;
 
     let num_params = inductive.num_params;
     let num_ctors = inductive.constructors.len();
@@ -144,11 +178,11 @@ fn try_iota(state: &ElabState, term: &Term) -> Option<Term> {
     }
 
     let scrutinee_idx = num_params + 1;
-    let scrutinee = whnf(state, args[scrutinee_idx]);
+    let scrutinee = whnf_env(env, args[scrutinee_idx]);
 
     // If the scrutinee is a Nat literal, convert it to constructor form
     let scrutinee = if let Term::Lit(Literal::Nat(n)) = &scrutinee {
-        nat_lit_to_ctor(state, *n).unwrap_or(scrutinee)
+        nat_lit_to_ctor(env, *n).unwrap_or(scrutinee)
     } else {
         scrutinee
     };
@@ -165,7 +199,7 @@ fn try_iota(state: &ElabState, term: &Term) -> Option<Term> {
     let branch = args[num_params + 2 + branch_idx];
 
     // Look up the constructor's type to determine field types and which are recursive
-    let ctor_decl = state.env.lookup(ctor_name)?;
+    let ctor_decl = env.lookup(ctor_name)?;
     let ctor_type = ctor_decl.type_().clone();
 
     // Extract the actual type parameter arguments from the scrutinee's type position

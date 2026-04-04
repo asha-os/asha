@@ -35,6 +35,9 @@ impl Display for Declaration {
             Declaration::Opaque { name, type_, .. } => {
                 write!(f, "opaque {} : {}", name.to_string(), type_)
             }
+            Declaration::Recursor { name, type_, .. } => {
+                write!(f, "recursor {} : {}", name.to_string(), type_)
+            }
         }
     }
 }

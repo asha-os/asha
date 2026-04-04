@@ -41,3 +41,5 @@ def succ_greater : (x : Nat) -> gt (add x 1) 1
 def identity (h : Prop) : h -> h := λ(p : h) => p
 
 def eq_refl (x : Nat) : x = x := Eq::refl
+
+def main : Nat := add 2 3

@@ -227,12 +227,12 @@ pub fn replace_rec_call(
     structural_arg: &Name,
     replacement: &Term,
 ) -> Term {
-    if let Term::App(_, last_arg) = term
-        && let Term::FVar(u) = last_arg.as_ref()
-        && *u == *structural_arg
-        && let (head, _) = collect_app_spine(term)
-        && let Term::Const(name) = head
+    let (head, args) = collect_app_spine(term);
+    if let Term::Const(name) = head
         && name == fn_name
+        && args
+            .iter()
+            .any(|a| matches!(a, Term::FVar(u) if *u == *structural_arg))
     {
         return replacement.clone();
     }

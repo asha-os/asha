@@ -120,6 +120,7 @@ impl Default for Namespace {
 }
 
 /// The registry of built-in primitive types, operations, and type class instances.
+#[derive(Debug, Clone)]
 pub struct LanguageItems(BTreeMap<String, Name>);
 
 impl Default for LanguageItems {
@@ -164,7 +165,9 @@ pub struct Environment {
     pub module_id: ModuleId,
     /// Externally-provided declarations. Maps name to its type.
     pub externals: BTreeMap<Name, Term>,
-    /// All declarations elaborated in this module (definitions, constructors, etc.).
+    /// The qualified name of the main function, if defined.
+    pub main_fn: Option<Name>,
+    /// All declarations elaborated in this module (definitions, constructors, etc).
     pub decls: BTreeMap<Name, Declaration>,
     /// All aliases, maps them to their elaborated values and types
     pub aliases: BTreeMap<Name, (Term, Term)>,
@@ -174,6 +177,8 @@ pub struct Environment {
     pub inductives: BTreeMap<Name, InductiveMetadata>,
     /// Reverse lookup of match functions to inductive name
     pub match_fns: BTreeMap<Name, Name>,
+    /// Mapping of built-in primitive names to their qualified names in the environment.
+    pub lang_items: LanguageItems,
 }
 
 impl Environment {
@@ -222,6 +227,8 @@ pub enum Declaration {
     Constructor { name: Name, type_: Term, span: Span },
     /// A forward-declared definition whose body we don't want to unfold for some reason.
     Opaque { name: Name, type_: Term, span: Span },
+    /// A generated eliminator for an inductive type. Reduces via iota reduction.
+    Recursor { name: Name, type_: Term, span: Span },
 }
 
 impl Declaration {
@@ -231,7 +238,8 @@ impl Declaration {
         match self {
             Declaration::Definition { name, .. }
             | Declaration::Constructor { name, .. }
-            | Declaration::Opaque { name, .. } => name,
+            | Declaration::Opaque { name, .. }
+            | Declaration::Recursor { name, .. } => name,
         }
     }
 
@@ -241,7 +249,8 @@ impl Declaration {
         match self {
             Declaration::Definition { type_, .. }
             | Declaration::Constructor { type_, .. }
-            | Declaration::Opaque { type_, .. } => type_,
+            | Declaration::Opaque { type_, .. }
+            | Declaration::Recursor { type_, .. } => type_,
         }
     }
 }
@@ -266,8 +275,6 @@ pub struct ElabState {
     pub open_namespaces: Vec<Vec<String>>,
     /// Errors accumulated during elaboration (reported at the end).
     pub errors: Vec<ElabError>,
-    /// Mapping of built-in primitive names to their qualified names in the environment.
-    pub lang_items: LanguageItems,
     /// Source file ID for span computation from CST nodes.
     pub file: usize,
 }
@@ -282,9 +289,11 @@ impl ElabState {
                 externals: BTreeMap::new(),
                 decls: BTreeMap::new(),
                 aliases: BTreeMap::new(),
+                main_fn: None,
                 root_namespace: Namespace::new(),
                 inductives: BTreeMap::new(),
                 match_fns: BTreeMap::new(),
+                lang_items: LanguageItems::new(),
             },
             gen_: UniqueGen::new(module),
             mctx: MetavarContext::new(),
@@ -292,7 +301,6 @@ impl ElabState {
             current_namespace: Vec::new(),
             open_namespaces: Vec::new(),
             errors: Vec::new(),
-            lang_items: LanguageItems::new(),
             file,
         }
     }
@@ -467,6 +475,14 @@ impl ElabState {
         let name = d.name().unwrap_or("_");
         let span = d.span(self.file);
         let def_name = self.gen_.fresh_name(name.to_string());
+        if name == "main" {
+            if self.env.main_fn.is_some() {
+                self.errors
+                    .push(ElabError::new(ElabErrorKind::DuplicateMain, span));
+            } else {
+                self.env.main_fn = Some(def_name.clone());
+            }
+        }
 
         let saved_lctx = self.lctx.clone();
         let binder_fvars = self.elaborate_binders_iter(d.binders());
@@ -692,7 +708,7 @@ impl ElabState {
                     InfixOp::Gt => "gt",
                     InfixOp::Geq => "geq",
                 };
-                let Some(op_fn_name) = self.lang_items.get(op_fn_li).cloned() else {
+                let Some(op_fn_name) = self.env.lang_items.get(op_fn_li).cloned() else {
                     self.errors.push(ElabError::new(
                         ElabErrorKind::MissingLangItem(op_fn_li.to_string()),
                         span,
@@ -1106,7 +1122,7 @@ impl ElabState {
         );
         self.env.decls.insert(
             match_fn_name.clone(),
-            Declaration::Constructor {
+            Declaration::Recursor {
                 name: match_fn_name.clone(),
                 type_: match_fn_type,
                 span,
@@ -1718,7 +1734,7 @@ impl ElabState {
 
     /// Retrieves a language item by name, returning an error if it's not found
     fn get_lang_item_or_error(&mut self, item: &str, span: Span) -> Term {
-        if let Some(li_name) = self.lang_items.get(item) {
+        if let Some(li_name) = self.env.lang_items.get(item) {
             Term::Const(li_name.clone())
         } else {
             self.errors.push(ElabError::new(
@@ -1736,7 +1752,7 @@ impl ElabState {
                 if let Some(arg) = attr.args().next() {
                     if let Expr::Lit(lit) = &arg {
                         if let Some(Literal::Str(item_name)) = lit.literal() {
-                            self.lang_items.insert(&item_name, name.clone());
+                            self.env.lang_items.insert(&item_name, name.clone());
                         }
                     }
                 }

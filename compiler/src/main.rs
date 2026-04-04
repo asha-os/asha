@@ -13,8 +13,7 @@ use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource};
 use cstree::syntax::SyntaxNode;
 
 use crate::{
-    log::ErrorWithSource,
-    syntax::{SourceFile, kind::SyntaxKind, lexer::Lexer, parser::parse},
+    reducer::Reducer, log::ErrorWithSource, syntax::{SourceFile, kind::SyntaxKind, lexer::Lexer, parser::parse}
 };
 
 extern crate alloc;
@@ -22,6 +21,7 @@ extern crate common;
 extern crate runtime;
 
 pub mod elaboration;
+pub mod reducer;
 pub mod log;
 pub mod module;
 pub mod spine;
@@ -93,15 +93,17 @@ pub extern "C" fn _start() -> ! {
 
         {
             let interner = parse_output.cache.into_interner().unwrap();
-            let root = SyntaxNode::<SyntaxKind>::new_root_with_resolver(
-                parse_output.green,
-                interner,
-            );
+            let root =
+                SyntaxNode::<SyntaxKind>::new_root_with_resolver(parse_output.green, interner);
             println!("CST produced for module {}", source_file.name);
             let module_id = source_file.name.to_string();
             println!("Elaborating module {}...", module_id);
             match elaboration::elaborate_file(module_id, &root, source_file.id) {
-                Ok(elab) => println!("Elaboration successful:\n{}", elab),
+                Ok(elab) => {
+                    println!("Elaboration successful:\n{}", elab);
+                    let interpreter = Reducer::new(elab);
+                    interpreter.run();
+                },
                 Err(errs) => {
                     println!("Elaboration failed with {} error(s):", errs.len());
                     for err in &errs {

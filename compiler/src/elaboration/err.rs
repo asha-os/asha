@@ -1,10 +1,6 @@
 use core::fmt::Display;
 
-use crate::{
-    module::name::Name,
-    spine::Term,
-    syntax::Span,
-};
+use crate::{module::name::Name, spine::Term, syntax::Span};
 use alloc::{boxed::Box, format, string::String};
 use miette::{Diagnostic, LabeledSpan};
 
@@ -40,6 +36,7 @@ impl Display for ElabError {
             ElabErrorKind::NotAConstructorType(_) => write!(f, "expected a constructor type"),
             ElabErrorKind::ImpossiblePattern { .. } => write!(f, "impossible pattern"),
             ElabErrorKind::MissingLangItem(item) => write!(f, "missing lang item `{item}`"),
+            ElabErrorKind::DuplicateMain => write!(f, "duplicate `main` declaration"),
         }
     }
 }
@@ -67,6 +64,7 @@ pub enum ElabErrorKind {
         found: Term,
     },
     MissingLangItem(String),
+    DuplicateMain,
 }
 
 impl miette::StdError for ElabError {}
@@ -88,6 +86,7 @@ impl Diagnostic for ElabError {
             ElabErrorKind::NotAConstructorType(_) => "E0211",
             ElabErrorKind::ImpossiblePattern { .. } => "E0212",
             ElabErrorKind::MissingLangItem(_) => "E0213",
+            ElabErrorKind::DuplicateMain => "E0214",
         };
         Some(Box::new(code))
     }
@@ -139,6 +138,8 @@ impl Diagnostic for ElabError {
             ElabErrorKind::MissingLangItem(item) => {
                 format!("add `@[wired_in \"{item}\"]` to the relevant declaration")
             }
+
+            ElabErrorKind::DuplicateMain => "only one `main` declaration is allowed".into(),
         };
 
         Some(Box::new(core::iter::once(LabeledSpan::new(
