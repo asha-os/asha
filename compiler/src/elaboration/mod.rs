@@ -49,11 +49,7 @@ use crate::{
         patterns::{MatchProblem, Pattern, PatternRow, Scrutinee},
         reduce::{head_const, is_recursive_field},
     },
-    module::{
-        ModuleId,
-        name::Name,
-        unique::{Unique, UniqueGen},
-    },
+    module::{ModuleId, name::Name, unique::UniqueGen},
     spine::{BinderInfo, Level, Literal, Term, uncurry},
     syntax::{
         Span,
@@ -310,9 +306,9 @@ impl ElabState {
 
     /// Creates a fresh free variable with the given display name and type, pushes it
     /// onto the local context, and returns both the [`Unique`] and `Term::FVar`.
-    pub fn fresh_fvar(&mut self, name: String, type_: Term) -> (Unique, Term) {
-        let u = self.lctx.push_binder(name, type_, &mut self.gen_);
-        (u.id.clone(), Term::FVar(u.id))
+    pub fn fresh_fvar(&mut self, name: String, type_: Term) -> (Name, Term) {
+        let name = self.lctx.push_binder(name, type_, &mut self.gen_);
+        (name.clone(), Term::FVar(name))
     }
 
     /// Produces a throwaway metavariable term used as a placeholder after an error.
@@ -407,14 +403,14 @@ impl ElabState {
     ///
     /// Returns a list of `(fvar, binder_info, elaborated_type)` triples, which can later
     /// be used by [`Self::abstract_binders`] to build Pi types.
-    fn elaborate_binders_iter<'a, I>(&mut self, binders: I) -> Vec<(Unique, BinderInfo, Term)>
+    fn elaborate_binders_iter<'a, I>(&mut self, binders: I) -> Vec<(Name, BinderInfo, Term)>
     where
         I: Iterator<Item = Binder<'a>>,
     {
         binders.map(|b| self.elaborate_binder(&b)).collect()
     }
 
-    fn elaborate_binder(&mut self, binder: &Binder) -> (Unique, BinderInfo, Term) {
+    fn elaborate_binder(&mut self, binder: &Binder) -> (Name, BinderInfo, Term) {
         let info = match binder {
             Binder::Explicit(_) => BinderInfo::Explicit,
             Binder::Implicit(_) => BinderInfo::Implicit,
@@ -444,7 +440,7 @@ impl ElabState {
     ///
     /// For binders `(a, b, c)` and a term `T`, produces `Pi a. Pi b. Pi c. T`
     /// where each free variable is abstracted into the corresponding De Bruijn index.
-    fn abstract_binders(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
+    fn abstract_binders(binder_fvars: &[(Name, BinderInfo, Term)], mut term: Term) -> Term {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
             term = Term::mk_pi(*info, ty.clone(), term);
@@ -452,7 +448,7 @@ impl ElabState {
         term
     }
 
-    fn abstract_binders_lam(binder_fvars: &[(Unique, BinderInfo, Term)], mut term: Term) -> Term {
+    fn abstract_binders_lam(binder_fvars: &[(Name, BinderInfo, Term)], mut term: Term) -> Term {
         for (fvar, info, ty) in binder_fvars.iter().rev() {
             term = subst::abstract_fvar(&term, fvar.clone());
             term = Term::mk_lam(*info, ty.clone(), term);
@@ -603,7 +599,7 @@ impl ElabState {
                 if namespace.is_empty()
                     && let Some(decl) = self.lctx.lookup_name(member)
                 {
-                    return (Term::FVar(decl.fvar.id.clone()), decl.type_.clone());
+                    return (Term::FVar(decl.fvar.clone()), decl.type_.clone());
                 }
 
                 if let Some((name, type_)) = self.resolve_name(&namespace, member) {
@@ -752,7 +748,7 @@ impl ElabState {
                 };
                 let normalized_value_type = reduce::whnf(self, &value_type);
                 if let Some(record_name) = head_const(&normalized_value_type) {
-                    let namespace = record_name.name.clone();
+                    let namespace = record_name.to_string();
                     if let Some((proj_fn_name, proj_fn_type)) =
                         self.resolve_name(slice::from_ref(&namespace), field)
                     {
@@ -1048,7 +1044,7 @@ impl ElabState {
         attributes: &[Attribute],
         name: &str,
         ind_name: &Name,
-        binder_fvars: &[(Unique, BinderInfo, Term)],
+        binder_fvars: &[(Name, BinderInfo, Term)],
         index_type: Term,
         span: Span,
     ) {
@@ -1093,7 +1089,7 @@ impl ElabState {
         &mut self,
         name: &str,
         ind_name: Name,
-        binder_fvars: &[(Unique, BinderInfo, Term)],
+        binder_fvars: &[(Name, BinderInfo, Term)],
         constructors: Vec<(Name, Term)>,
         mut namespace: Namespace,
         span: Span,
@@ -1197,7 +1193,7 @@ impl ElabState {
         &mut self,
         inductive_namespace: &mut Namespace,
         inductive_name: &Name,
-        binders: &[(Unique, BinderInfo, Term)],
+        binders: &[(Name, BinderInfo, Term)],
         constructors: &[InductiveCtor],
     ) -> Vec<(Name, Term)> {
         let mut constructor_data = Vec::new();
@@ -1389,7 +1385,7 @@ impl ElabState {
         match pattern {
             Pattern::Var(Some(fvar)) => Term::FVar(fvar.clone()),
             Pattern::Var(None) => {
-                let u = self.gen_.fresh_unnamed();
+                let u = self.gen_.fresh_anonymous();
                 Term::FVar(u)
             }
             Pattern::Constructor { ctor, fields, .. } => {
@@ -1496,7 +1492,7 @@ impl ElabState {
     fn generate_match_fn_type(
         &mut self,
         inductive_name: &Name,
-        binder_fvars: &[(Unique, BinderInfo, Term)],
+        binder_fvars: &[(Name, BinderInfo, Term)],
         constructor_names: &[Name],
         constructors_types: &[Term],
     ) -> Term {
@@ -1609,7 +1605,7 @@ impl ElabState {
         all_field_types: &[Term],
         field_index: usize,
         field_type: &Term,
-        binder_fvars: &[(Unique, BinderInfo, Term)],
+        binder_fvars: &[(Name, BinderInfo, Term)],
         span: Span,
     ) -> Declaration {
         let num_fields = all_field_types.len();
@@ -1632,7 +1628,7 @@ impl ElabState {
         );
 
         // Scrutinee is the free variable for the record argument
-        let scrutinee_fvar = self.gen_.fresh_unnamed();
+        let scrutinee_fvar = self.gen_.fresh_anonymous();
         let scrutinee = Term::FVar(scrutinee_fvar.clone());
 
         // Build: match_fn motive scrutinee branch

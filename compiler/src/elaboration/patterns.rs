@@ -8,10 +8,7 @@ use crate::{
         reduce::{head_const, is_recursive_field, whnf},
         subst, unify,
     },
-    module::{
-        name::Name,
-        unique::{Unique, UniqueGen},
-    },
+    module::{name::Name, unique::UniqueGen},
     spine::{BinderInfo, Literal, Term},
     syntax::Span,
 };
@@ -19,7 +16,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A pattern in a pattern match, which can be a variable, a constructor with subpatterns, or a literal.
 pub enum Pattern {
-    Var(Option<Unique>),
+    Var(Option<Name>),
     Constructor {
         ctor: Name,
         fields: Vec<Pattern>,
@@ -172,7 +169,7 @@ pub fn compile(
         // First, wrap IH lambdas
         for (fvar, field_type) in field_fvars.iter().rev().zip(field_types.iter().rev()) {
             if is_recursive_field(field_type, &inductive_name) {
-                let ih_fvar = state.gen_.fresh_unnamed();
+                let ih_fvar = state.gen_.fresh_anonymous();
 
                 // Replace recursive calls on this field with the IH fvar
                 if let Some(ref rec_fn) = problem.match_fn {
@@ -277,11 +274,11 @@ fn specialize(
     ctor: &Name,
     ctor_arity: usize,
     field_types: &[Term],
-) -> (MatchProblem, Vec<Unique>) {
+) -> (MatchProblem, Vec<Name>) {
     let mut new_scrutinees = Vec::new();
     let mut field_fvars = Vec::new();
     for field_type in field_types {
-        let fvar = gen_.fresh_unnamed();
+        let fvar = gen_.fresh_anonymous();
         field_fvars.push(fvar.clone());
         new_scrutinees.push(Scrutinee {
             term: Term::FVar(fvar),

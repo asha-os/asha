@@ -61,7 +61,8 @@ pub fn is_def_eq(state: &mut ElabState, a: &Term, b: &Term) -> bool {
 fn structural_eq(a: &Term, b: &Term) -> bool {
     match (a, b) {
         (Term::BVar(i), Term::BVar(j)) => i == j,
-        (Term::FVar(u1), Term::FVar(u2)) | (Term::MVar(u1), Term::MVar(u2)) => u1 == u2,
+        (Term::FVar(n1), Term::FVar(n2)) => n1 == n2,
+        (Term::MVar(u1), Term::MVar(u2)) => u1 == u2,
         (Term::Lit(l1), Term::Lit(l2)) => l1 == l2,
         (Term::Sort(l1), Term::Sort(l2)) => structural_eq_level(l1, l2),
         (Term::App(f1, a1), Term::App(f2, a2)) => structural_eq(f1, f2) && structural_eq(a1, a2),

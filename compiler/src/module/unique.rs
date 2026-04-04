@@ -63,7 +63,12 @@ impl UniqueGen {
 
     pub fn fresh_name(&mut self, name: String) -> Name {
         let unique = self.fresh();
-        Name::new(unique, name)
+        Name::Explicit(unique, name)
+    }
+    
+    pub fn fresh_anonymous(&mut self) -> Name {
+        let unique = self.fresh();
+        Name::Anonymous(unique)
     }
 
     pub fn fresh_unnamed(&mut self) -> Unique {

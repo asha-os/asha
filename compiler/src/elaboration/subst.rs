@@ -1,9 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::{
-    module::{name::Name, unique::Unique},
-    spine::Term,
-};
+use crate::{module::name::Name, spine::Term};
 
 /// Substitutes `replacement` for `BVar(0)` in `term` (beta reduction).
 ///
@@ -117,13 +114,13 @@ fn shift_at(term: &Term, amount: usize, depth: usize) -> Term {
 /// variable indices at or above the current depth are shifted up by one to make room
 /// for the new binder.
 #[must_use]
-pub fn abstract_fvar(term: &Term, fvar: Unique) -> Term {
+pub fn abstract_fvar(term: &Term, fvar: Name) -> Term {
     abstract_fvar_at(term, fvar, 0)
 }
 
 /// Recursive worker for [`abstract_fvar`]. `depth` is the De Bruijn index that
 /// `fvar` will be mapped to at the current binding level.
-fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
+fn abstract_fvar_at(term: &Term, fvar: Name, depth: usize) -> Term {
     match term {
         Term::FVar(u) if *u == fvar => Term::BVar(depth),
 
@@ -171,7 +168,7 @@ fn abstract_fvar_at(term: &Term, fvar: Unique, depth: usize) -> Term {
 
 /// Replaces all occurrences of `fvar` in `term` with `replacement`.
 #[must_use]
-pub fn replace_fvar(term: &Term, fvar: &Unique, replacement: &Term) -> Term {
+pub fn replace_fvar(term: &Term, fvar: &Name, replacement: &Term) -> Term {
     match term {
         Term::FVar(u) if *u == *fvar => replacement.clone(),
 
@@ -227,7 +224,7 @@ fn collect_app_spine(term: &Term) -> (&Term, Vec<&Term>) {
 pub fn replace_rec_call(
     term: &Term,
     fn_name: &Name,
-    structural_arg: &Unique,
+    structural_arg: &Name,
     replacement: &Term,
 ) -> Term {
     if let Term::App(_, last_arg) = term

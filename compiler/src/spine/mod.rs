@@ -5,7 +5,7 @@ use crate::module::{name::Name, unique::Unique};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
     BVar(usize),
-    FVar(Unique),
+    FVar(Name),
     MVar(Unique),
     App(Box<Term>, Box<Term>),
     Sort(Level),

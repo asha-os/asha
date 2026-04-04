@@ -9,7 +9,6 @@ use alloc::{
 
 use crate::{
     elaboration::{Declaration, Environment},
-    module::name::Name,
     spine::{BinderInfo, Level, Term},
 };
 
@@ -28,13 +27,13 @@ impl Display for Declaration {
             Declaration::Definition {
                 name, type_, value, ..
             } => {
-                write!(f, "def {} : {} = {}", name.name, type_, value)
+                write!(f, "def {} : {} = {}", name.to_string(), type_, value)
             }
             Declaration::Constructor { name, type_, .. } => {
-                write!(f, "constructor {} : {}", name.name, type_)
+                write!(f, "constructor {} : {}", name.to_string(), type_)
             }
             Declaration::Opaque { name, type_, .. } => {
-                write!(f, "opaque {} : {}", name.name, type_)
+                write!(f, "opaque {} : {}", name.to_string(), type_)
             }
         }
     }
@@ -57,8 +56,8 @@ fn pretty_term_prec(term: &Term, prec: u8) -> String {
     let s = match term {
         Term::MVar(_) => "?_".into(),
         Term::BVar(i) => format!("b{i}"),
-        Term::FVar(unique) => format!("f{}", unique.id),
-        Term::Const(qname) => qname.name.clone(),
+        Term::FVar(name) => format!("{}", name),
+        Term::Const(qname) => qname.to_string(),
 
         Term::App(_, _) => {
             let (head, args) = collect_spine(term);
@@ -154,12 +153,6 @@ fn collect_spine(term: &Term) -> (&Term, Vec<&Term>) {
     (cur, args)
 }
 
-impl Display for Name {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
 impl Display for Level {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", DisplayableLevel::from(self))
@@ -203,9 +196,7 @@ impl From<&Level> for DisplayableLevel {
                 Box::new(DisplayableLevel::from(l2.as_ref())),
             ),
             Level::MVar(unique) => DisplayableLevel::MVar(unique.id),
-            Level::Param(qname) => {
-                DisplayableLevel::Param(qname.name.clone())
-            }
+            Level::Param(qname) => DisplayableLevel::Param(qname.to_string()),
         }
     }
 }

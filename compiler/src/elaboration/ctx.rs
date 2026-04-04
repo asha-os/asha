@@ -1,4 +1,4 @@
-use alloc::{collections::btree_map::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::btree_map::BTreeMap, string::{String, ToString}, vec::Vec};
 
 use crate::{
     module::{name::Name, unique::{Unique, UniqueGen}},
@@ -68,7 +68,7 @@ impl LocalContext {
     pub fn lookup_name(&self, name: &str) -> Option<&LocalDecl> {
         self.decls
             .iter()
-            .rfind(|d| d.fvar.name == name)
+            .rfind(|d| d.fvar.to_string() == name)
     }
 }
 
